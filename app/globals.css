@@ -1,0 +1,47 @@
+@import url('https://fonts.googleapis.com/css2?family=Cormorant+Garamond:wght@300;400&family=Shippori+Mincho:wght@500;600&family=Zen+Kaku+Gothic+New:wght@400;500&display=swap');
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* ── Color tokens (light / dark) ── */
+:root {
+  --font-cormorant: 'Cormorant Garamond', Georgia, serif;
+  --font-shippori: 'Shippori Mincho', serif;
+  --font-zen: 'Zen Kaku Gothic New', sans-serif;
+
+  --color-ink:    #0A0A0A;
+  --color-ink-2:  #2A2A2A;
+  --color-muted:  #6E6B65;
+  --color-muted-2:#9A968F;
+  --color-line:   #E3DFD6;
+  --color-line-2: #EFEBE2;
+  --color-paper:  #F7F5EF;
+  --color-bg:     #F0ECE2;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --color-ink:    #EDE9DF;
+    --color-ink-2:  #C9C5BC;
+    --color-muted:  #9A968F;
+    --color-muted-2:#6E6B65;
+    --color-line:   #2C2924;
+    --color-line-2: #231F1B;
+    --color-paper:  #1C1916;
+    --color-bg:     #141210;
+  }
+}
+
+body {
+  background-color: var(--color-bg);
+  color: var(--color-ink);
+  font-family: var(--font-zen);
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+/* 読書アプリらしい細い scrollbar */
+::-webkit-scrollbar { width: 4px; }
+::-webkit-scrollbar-track { background: var(--color-line-2); }
+::-webkit-scrollbar-thumb { background: var(--color-muted-2); border-radius: 2px; }

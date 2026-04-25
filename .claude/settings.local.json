@@ -1,0 +1,11 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(npm install *)",
+      "Bash(npm show *)",
+      "Bash(node -e \"const v=require\\('fs'\\).readFileSync\\('/dev/stdin','utf8'\\); const all=JSON.parse\\(v\\); const v14=all.filter\\(x=>x.startsWith\\('14.'\\)\\); console.log\\(v14.slice\\(-5\\).join\\('\\\\n'\\)\\);\")",
+      "Bash(npm audit *)",
+      "Bash(npm run *)"
+    ]
+  }
+}
