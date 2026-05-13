@@ -131,29 +131,40 @@ export default async function StatsPage() {
           <p className="font-zen text-[10px] tracking-[0.25em] text-muted uppercase mb-2.5">
             Total Reading Time
           </p>
-          <div className="flex items-baseline gap-1.5">
-            {hours > 0 && (
-              <>
-                <span className="font-cormorant text-[80px] font-light text-ink leading-none tracking-[-0.03em]">
-                  {hours}
+          {totalSeconds === 0 ? (
+            <>
+              <span className="font-cormorant text-[80px] font-light leading-none tracking-[-0.03em] text-line">
+                —
+              </span>
+              <p className="font-zen text-[11px] text-muted-2 mt-1.5">記録がまだありません</p>
+            </>
+          ) : (
+            <>
+              <div className="flex items-baseline gap-1.5">
+                {hours > 0 && (
+                  <>
+                    <span className="font-cormorant text-[80px] font-light text-ink leading-none tracking-[-0.03em]">
+                      {hours}
+                    </span>
+                    <span className="font-cormorant text-[28px] font-light text-muted">
+                      h
+                    </span>
+                  </>
+                )}
+                <span
+                  className={`font-cormorant font-light text-ink-2 leading-none tracking-[-0.02em] ${hours > 0 ? "text-[48px]" : "text-[80px]"}`}
+                >
+                  {minutes}
                 </span>
                 <span className="font-cormorant text-[28px] font-light text-muted">
-                  h
+                  m
                 </span>
-              </>
-            )}
-            <span
-              className={`font-cormorant font-light text-ink-2 leading-none tracking-[-0.02em] ${hours > 0 ? "text-[48px]" : "text-[80px]"}`}
-            >
-              {minutes}
-            </span>
-            <span className="font-cormorant text-[28px] font-light text-muted">
-              m
-            </span>
-          </div>
-          <p className="font-zen text-[11px] text-muted-2 mt-1.5">
-            1日平均 {avgMinPerDay} 分
-          </p>
+              </div>
+              <p className="font-zen text-[11px] text-muted-2 mt-1.5">
+                1日平均 {avgMinPerDay} 分
+              </p>
+            </>
+          )}
         </div>
 
         {/* ── 4-grid stats ── */}
@@ -164,35 +175,39 @@ export default async function StatsPage() {
           {[
             {
               label: "Finished",
-              value: finishedCount,
-              unit: "books",
+              value: finishedCount > 0 ? finishedCount : "—",
+              unit: finishedCount > 0 ? "books" : "",
               sub: "読了した本",
+              empty: finishedCount === 0,
             },
             {
               label: "Reading",
-              value: readingCount,
-              unit: "books",
+              value: readingCount > 0 ? readingCount : "—",
+              unit: readingCount > 0 ? "books" : "",
               sub: "読書中の本",
+              empty: readingCount === 0,
             },
             {
               label: "Pages",
-              value: totalPages.toLocaleString("ja-JP"),
+              value: totalPages > 0 ? totalPages.toLocaleString("ja-JP") : "—",
               unit: "",
               sub: "読んだページ",
+              empty: totalPages === 0,
             },
             {
               label: "Streak",
-              value: streak,
-              unit: "days",
+              value: streak > 0 ? streak : "—",
+              unit: streak > 0 ? "days" : "",
               sub: "連続読書日数",
+              empty: streak === 0,
             },
-          ].map(({ label, value, unit, sub }) => (
+          ].map(({ label, value, unit, sub, empty }) => (
             <div key={label} className="bg-paper px-[18px] py-4">
               <p className="font-zen text-[10px] tracking-[0.25em] text-muted uppercase mb-2">
                 {label}
               </p>
               <div className="flex items-baseline gap-1">
-                <span className="font-cormorant text-[34px] font-light text-ink leading-none tracking-[-0.02em]">
+                <span className={`font-cormorant text-[34px] font-light leading-none tracking-[-0.02em] ${empty ? "text-line" : "text-ink"}`}>
                   {value}
                 </span>
                 {unit && (

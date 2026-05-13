@@ -1,8 +1,125 @@
 "use client";
 
 import { useState, useOptimistic, useTransition } from "react";
-import { updateCurrentPage, updateBookStatus } from "@/app/books/[id]/actions";
+import { useRouter } from "next/navigation";
+import { updateCurrentPage, updateBookStatus, deleteBook } from "@/app/books/[id]/actions";
+import { formatDuration } from "@/lib/utils";
 import type { BookStatus } from "@/lib/supabase/types";
+
+/* ── 本の削除メニュー ── */
+export function BookMenu({
+  bookId,
+  bookTitle,
+  bookAuthor,
+  sessionCount,
+  totalSeconds,
+}: {
+  bookId: string;
+  bookTitle: string;
+  bookAuthor: string;
+  sessionCount: number;
+  totalSeconds: number;
+}) {
+  const [menuOpen, setMenuOpen] = useState(false);
+  const [sheetOpen, setSheetOpen] = useState(false);
+  const [isPending, startTransition] = useTransition();
+  const router = useRouter();
+
+  function handleDelete() {
+    startTransition(async () => {
+      await deleteBook(bookId);
+      router.push("/shelf");
+    });
+  }
+
+  return (
+    <>
+      <button
+        onClick={() => setMenuOpen(!menuOpen)}
+        className="w-[22px] h-[22px] flex items-center justify-center"
+        aria-label="メニュー"
+      >
+        <svg width="22" height="22" viewBox="0 0 22 22" fill="none">
+          <circle cx="11" cy="5" r="1.4" fill="currentColor" className="text-muted" />
+          <circle cx="11" cy="11" r="1.4" fill="currentColor" className="text-muted" />
+          <circle cx="11" cy="17" r="1.4" fill="currentColor" className="text-muted" />
+        </svg>
+      </button>
+
+      {menuOpen && (
+        <>
+          <div className="fixed inset-0 z-40" onClick={() => setMenuOpen(false)} />
+          <div className="absolute top-11 right-0 z-50 bg-paper border border-line rounded-sm shadow-lg py-1 min-w-[160px]">
+            <button
+              onClick={() => { setMenuOpen(false); setSheetOpen(true); }}
+              className="w-full flex items-center gap-3 px-4 py-3 font-zen text-[13px] text-[#C77B6F] hover:bg-bg transition-colors"
+            >
+              <svg width="14" height="14" viewBox="0 0 18 18" fill="none">
+                <path
+                  d="M3 5h12M7 5V3.5A1.5 1.5 0 0 1 8.5 2h1A1.5 1.5 0 0 1 11 3.5V5M5 5l.7 9.2A1.5 1.5 0 0 0 7.2 15.5h3.6a1.5 1.5 0 0 0 1.5-1.3L13 5"
+                  stroke="currentColor"
+                  strokeWidth="1.3"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                />
+              </svg>
+              本棚から削除
+            </button>
+          </div>
+        </>
+      )}
+
+      {sheetOpen && (
+        <div className="fixed inset-0 z-50 flex flex-col justify-end">
+          <div
+            className="absolute inset-0 bg-black/50"
+            onClick={() => !isPending && setSheetOpen(false)}
+          />
+          <div className="relative bg-paper rounded-t-2xl px-7 pb-10 pt-3 shadow-2xl">
+            <div className="w-10 h-[3px] bg-line rounded-full mx-auto mb-6" />
+
+            <div className="mb-6 pb-5 border-b border-line">
+              <p className="font-zen text-[11px] text-muted mb-1">{bookAuthor}</p>
+              <p className="font-shippori text-[17px] text-ink font-medium leading-snug line-clamp-2">
+                {bookTitle}
+              </p>
+            </div>
+
+            <h2 className="font-shippori text-[20px] font-medium text-ink leading-relaxed mb-3">
+              この本を本棚から<br />削除しますか？
+            </h2>
+            <p className="font-zen text-[12px] text-muted leading-relaxed mb-1">
+              読書履歴{" "}
+              <span className="font-cormorant text-[14px] text-ink">{sessionCount}</span>{" "}
+              件、累計時間{" "}
+              <span className="font-cormorant text-[14px] text-ink">{formatDuration(totalSeconds)}</span> も
+            </p>
+            <p className="font-zen text-[12px] text-muted leading-relaxed mb-7">
+              すべて消えます。この操作は取り消せません。
+            </p>
+
+            <div className="flex flex-col gap-2.5">
+              <button
+                onClick={handleDelete}
+                disabled={isPending}
+                className="w-full h-[50px] bg-[#C77B6F] font-zen text-[13px] tracking-[0.15em] text-white rounded-sm disabled:opacity-50 transition-opacity"
+              >
+                {isPending ? "削除中..." : "削除する"}
+              </button>
+              <button
+                onClick={() => setSheetOpen(false)}
+                disabled={isPending}
+                className="w-full h-[50px] border border-line font-zen text-[13px] tracking-[0.15em] text-ink rounded-sm disabled:opacity-40"
+              >
+                キャンセル
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+    </>
+  );
+}
 
 const STATUS_LABELS: Record<BookStatus, string> = {
   reading: "読書中",

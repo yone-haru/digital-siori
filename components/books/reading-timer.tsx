@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useRef, useCallback } from "react";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { saveReadingSession } from "@/app/books/[id]/reading/actions";
 
 const BRIGHT = "rgba(255,255,255,0.92)";
@@ -14,12 +15,16 @@ type Props = {
   startPage: number;
 };
 
+type SavedResult = { durationSeconds: number; pagesRead: number };
+
 export function ReadingTimer({ bookId, bookTitle, bookAuthor, startPage }: Props) {
   const [elapsed, setElapsed] = useState(0); // 秒
   const [isRunning, setIsRunning] = useState(true);
   const [currentPage, setCurrentPage] = useState(String(startPage));
-  const [phase, setPhase] = useState<"running" | "confirm" | "saving">("running");
+  const [phase, setPhase] = useState<"running" | "confirm" | "saving" | "saved">("running");
   const [error, setError] = useState<string | null>(null);
+  const [savedResult, setSavedResult] = useState<SavedResult | null>(null);
+  const router = useRouter();
 
   // マウント時刻を start とする（ref に保持してリレンダーの影響を受けない）
   const mountTime = useRef(Date.now());
@@ -61,8 +66,10 @@ export function ReadingTimer({ bookId, bookTitle, bookAuthor, startPage }: Props
     if (result && "error" in result) {
       setError(result.error);
       setPhase("confirm");
+    } else if (result && "success" in result) {
+      setSavedResult({ durationSeconds: result.durationSeconds, pagesRead: result.pagesRead });
+      setPhase("saved");
     }
-    // 成功時は server action が redirect するのでここには到達しない
   }, [bookId, startPage, currentPage]);
 
   const minutes = Math.floor(elapsed / 60);
@@ -236,6 +243,44 @@ export function ReadingTimer({ bookId, bookTitle, bookAuthor, startPage }: Props
           </button>
         )}
       </div>
+
+      {/* ── Session saved modal ── */}
+      {phase === "saved" && savedResult && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center px-8 bg-[#0F0D0A]/80">
+          <div className="w-full max-w-[320px] bg-paper rounded-sm px-7 py-8 flex flex-col items-center gap-0">
+            <p className="font-zen text-[10px] tracking-[0.28em] text-muted uppercase mb-5">
+              Session Saved
+            </p>
+            <div className="w-full border-t border-line mb-5" />
+
+            <div className="w-full flex flex-col gap-3 mb-5">
+              <div className="flex justify-between items-baseline">
+                <span className="font-zen text-[11px] tracking-[0.12em] text-muted">時間</span>
+                <span className="font-cormorant text-[20px] text-ink">
+                  {savedResult.durationSeconds >= 3600
+                    ? `${Math.floor(savedResult.durationSeconds / 3600)}h ${Math.floor((savedResult.durationSeconds % 3600) / 60)}m`
+                    : `${Math.floor(savedResult.durationSeconds / 60)}m ${savedResult.durationSeconds % 60}s`}
+                </span>
+              </div>
+              <div className="flex justify-between items-baseline">
+                <span className="font-zen text-[11px] tracking-[0.12em] text-muted">ページ</span>
+                <span className="font-cormorant text-[20px] text-ink">
+                  +{savedResult.pagesRead}p
+                </span>
+              </div>
+            </div>
+
+            <div className="w-full border-t border-line mb-6" />
+
+            <button
+              onClick={() => router.push(`/books/${bookId}`)}
+              className="w-full h-[44px] bg-ink font-zen text-[12px] tracking-[0.2em] text-paper rounded-sm"
+            >
+              完了
+            </button>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

@@ -3,7 +3,8 @@ import Link from "next/link";
 import { createServerClient } from "@/lib/supabase/server";
 import { BookCover } from "@/components/books/book-cover";
 import { BottomNav } from "@/components/ui/bottom-nav";
-import { PageUpdateForm, StatusButtons } from "@/components/books/detail-client";
+import { PageUpdateForm, StatusButtons, BookMenu } from "@/components/books/detail-client";
+import { ManualSessionForm } from "@/components/books/manual-session-form";
 import { formatDuration, formatSessionDate } from "@/lib/utils";
 
 export default async function BookDetailPage({
@@ -65,7 +66,7 @@ export default async function BookDetailPage({
   return (
     <div className="min-h-screen bg-paper flex flex-col">
       {/* Top bar */}
-      <div className="flex justify-between items-center px-7 py-3 shrink-0">
+      <div className="relative flex justify-between items-center px-7 py-3 shrink-0">
         <Link
           href="/shelf"
           className="text-ink hover:opacity-60 transition-opacity"
@@ -84,7 +85,13 @@ export default async function BookDetailPage({
         <span className="font-zen text-[10px] tracking-[0.25em] text-muted uppercase">
           Detail
         </span>
-        <div className="w-[22px]" />
+        <BookMenu
+          bookId={b.id}
+          bookTitle={b.title}
+          bookAuthor={b.author}
+          sessionCount={sessions?.length ?? 0}
+          totalSeconds={totalSeconds}
+        />
       </div>
 
       {/* Scrollable content */}
@@ -211,6 +218,9 @@ export default async function BookDetailPage({
             <polygon points="3,2 12,7 3,12" fill="currentColor" />
           </svg>
         </Link>
+
+        {/* Manual session */}
+        <ManualSessionForm bookId={b.id} currentPage={b.current_page} />
 
         {/* Reading history */}
         {sessions && sessions.length > 0 && (
