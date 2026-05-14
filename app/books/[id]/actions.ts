@@ -86,25 +86,60 @@ export async function updateCurrentPage(
 export async function updateBookStatus(bookId: string, status: BookStatus) {
   const supabase = await createServerClient();
 
+  const { data: book } = await supabase
+    .from("books")
+    .select("status, started_at, read_count")
+    .eq("id", bookId)
+    .single();
+
   const updates: Record<string, unknown> = { status };
 
   if (status === "reading") {
-    // 読書中に変えるとき started_at がなければセット
-    const { data: book } = await supabase
-      .from("books")
-      .select("started_at")
-      .eq("id", bookId)
-      .single();
     if (book && !book.started_at) {
+      updates.started_at = new Date().toISOString();
+    }
+    // 読了済みから再読：current_page をリセット
+    if (book?.status === "finished") {
+      updates.current_page = 0;
       updates.started_at = new Date().toISOString();
     }
   } else if (status === "finished") {
     updates.finished_at = new Date().toISOString();
+    // 読書中 → 読了のときだけ読了回数を増やす
+    if (book?.status === "reading") {
+      updates.read_count = (book.read_count ?? 0) + 1;
+    }
   }
 
   const { error } = await supabase
     .from("books")
     .update(updates)
+    .eq("id", bookId);
+
+  if (error) return { error: "更新に失敗しました" };
+  revalidatePath(`/books/${bookId}`);
+  revalidatePath("/shelf");
+  return { success: true };
+}
+
+export async function initBookRead(
+  bookId: string,
+  { prevReadCount, startPage }: { prevReadCount: number; startPage: number }
+): Promise<{ error: string } | { success: true }> {
+  const supabase = await createServerClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) return { error: "ログインが必要です" };
+
+  const { error } = await supabase
+    .from("books")
+    .update({
+      read_count: prevReadCount,
+      current_page: startPage,
+      status: "reading",
+      started_at: new Date().toISOString(),
+    })
     .eq("id", bookId);
 
   if (error) return { error: "更新に失敗しました" };

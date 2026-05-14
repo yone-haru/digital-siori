@@ -17,6 +17,7 @@ export type Database = {
           description: string | null;
           started_at: string | null;
           finished_at: string | null;
+          read_count: number;
           created_at: string;
           updated_at: string;
         };
@@ -33,6 +34,7 @@ export type Database = {
           description?: string | null;
           started_at?: string | null;
           finished_at?: string | null;
+          read_count?: number;
           created_at?: string;
           updated_at?: string;
         };
@@ -49,6 +51,7 @@ export type Database = {
           description?: string | null;
           started_at?: string | null;
           finished_at?: string | null;
+          read_count?: number;
           created_at?: string;
           updated_at?: string;
         };

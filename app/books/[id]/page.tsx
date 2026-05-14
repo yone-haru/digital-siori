@@ -5,6 +5,7 @@ import { BookCover } from "@/components/books/book-cover";
 import { BottomNav } from "@/components/ui/bottom-nav";
 import { PageUpdateForm, StatusButtons, BookMenu } from "@/components/books/detail-client";
 import { ManualSessionForm } from "@/components/books/manual-session-form";
+import { StartReadingButton } from "@/components/books/start-reading-button";
 import { formatDuration, formatSessionDate } from "@/lib/utils";
 
 export default async function BookDetailPage({
@@ -31,7 +32,6 @@ export default async function BookDetailPage({
 
   if (!book) redirect("/shelf");
 
-  // 型アサーション（Supabase generic 型未使用のため）
   const b = book as {
     id: string;
     title: string;
@@ -43,6 +43,7 @@ export default async function BookDetailPage({
     description: string | null;
     started_at: string | null;
     finished_at: string | null;
+    read_count: number;
   };
 
   const pct =
@@ -51,11 +52,20 @@ export default async function BookDetailPage({
       : 0;
   const remaining = Math.max(0, b.total_pages - b.current_page);
 
-  // 読書統計
   const totalSeconds =
     sessions?.reduce((sum, s) => sum + (s.duration_seconds ?? 0), 0) ?? 0;
 
-  // 読了予測（セッション記録 & current_page > 0 のときのみ）
+  // セッションのあった日（JST、重複除去）
+  const sessionDates = [
+    ...new Set(
+      sessions?.map((s) =>
+        new Date(new Date(s.started_at).getTime() + 9 * 3600 * 1000)
+          .toISOString()
+          .slice(0, 10)
+      ) ?? []
+    ),
+  ];
+
   let estimatedRemainingStr: string | null = null;
   if (sessions && sessions.length > 0 && b.current_page > 0 && remaining > 0) {
     const secondsPerPage = totalSeconds / b.current_page;
@@ -160,7 +170,6 @@ export default async function BookDetailPage({
             </div>
           </div>
 
-          {/* Progress bar */}
           <div className="h-[2px] bg-line rounded-[1px] mb-2">
             <div
               className="h-full bg-ink rounded-[1px] transition-all"
@@ -206,28 +215,32 @@ export default async function BookDetailPage({
               <span className="font-zen text-[12px] text-muted ml-1">回</span>
             </span>
           </div>
+          <div className="flex-1 bg-bg rounded-sm p-3">
+            <p className="font-zen text-[10px] tracking-[0.25em] text-muted uppercase mb-1.5">
+              Times Read
+            </p>
+            <span className="font-cormorant text-[22px] text-ink tracking-[-0.01em]">
+              {b.read_count ?? 0}
+              <span className="font-zen text-[12px] text-muted ml-1">回</span>
+            </span>
+          </div>
         </div>
 
         {/* Reading CTA */}
-        <Link
-          href={`/books/${b.id}/reading`}
-          className="flex items-center justify-center gap-2.5 w-full h-[52px] bg-ink text-paper font-zen text-[13px] tracking-[0.15em] rounded-sm mb-7 hover:opacity-90 transition-opacity"
-        >
-          読書をはじめる
-          <svg width="14" height="14" viewBox="0 0 14 14" fill="none">
-            <polygon points="3,2 12,7 3,12" fill="currentColor" />
-          </svg>
-        </Link>
-
-        {/* Manual session */}
-        <ManualSessionForm bookId={b.id} currentPage={b.current_page} />
+        <StartReadingButton
+          bookId={b.id}
+          isFirstEver={!sessions?.length && (b.read_count ?? 0) === 0}
+          totalPages={b.total_pages}
+        />
 
         {/* Reading history */}
-        {sessions && sessions.length > 0 && (
-          <div>
-            <p className="font-zen text-[10px] tracking-[0.25em] text-muted uppercase mb-4">
-              Reading History
-            </p>
+        <div>
+          <ManualSessionForm
+            bookId={b.id}
+            currentPage={b.current_page}
+            sessionDates={sessionDates}
+          />
+          {sessions && sessions.length > 0 ? (
             <ul>
               {sessions.map((s) => {
                 const pagesRead = (s.end_page ?? 0) - (s.start_page ?? 0);
@@ -253,8 +266,10 @@ export default async function BookDetailPage({
               })}
               <li className="border-t border-line" />
             </ul>
-          </div>
-        )}
+          ) : (
+            <p className="font-zen text-[12px] text-muted-2">記録なし</p>
+          )}
+        </div>
       </div>
 
       <BottomNav />
