@@ -1,26 +1,7 @@
 {
   "permissions": {
     "allow": [
-      "Bash(npm install *)",
-      "Bash(npm show *)",
-      "Bash(node -e \"const v=require\\('fs'\\).readFileSync\\('/dev/stdin','utf8'\\); const all=JSON.parse\\(v\\); const v14=all.filter\\(x=>x.startsWith\\('14.'\\)\\); console.log\\(v14.slice\\(-5\\).join\\('\\\\n'\\)\\);\")",
-      "Bash(npm audit *)",
-      "Bash(npm run *)",
-      "Bash(npx tsc *)",
-      "Bash(npx next *)",
-      "Bash(curl -s -o /dev/null -w \"%{http_code}\" http://localhost:3000)",
-      "Bash(git checkout *)",
-      "Bash(Remove-Item -Force \"components\\\\books\\\\manual-session-form.tsx\" -ErrorAction SilentlyContinue)",
-      "Bash(Remove-Item -Force \"components\\\\books\\\\start-reading-button.tsx\" -ErrorAction SilentlyContinue)",
-      "Bash(Remove-Item -Recurse -Force \"components\\\\stats\" -ErrorAction SilentlyContinue)",
-      "Bash(Remove-Item -Force \"components\\\\ui\\\\calendar-picker.tsx\" -ErrorAction SilentlyContinue)",
-      "Bash(Remove-Item -Force \"components\\\\ui\\\\dial-input.tsx\" -ErrorAction SilentlyContinue)",
-      "Bash(git diff *)",
-      "Bash(dir /s /b app components lib)",
-      "Bash(findstr /E \".tsx .ts\")",
-      "Bash(find design_handoff* -type f)",
-      "Bash(ls \"c:/Users/晴輝/Documents/Life log factory/\")",
-      "Read(//c/Users/晴輝/Documents/Life log factory/**)"
+      "Bash(git add *)"
     ]
   }
 }
