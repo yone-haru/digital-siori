@@ -37,3 +37,9 @@ yarn-error.log*
 # typescript
 *.tsbuildinfo
 next-env.d.ts
+
+# design / docs (large files, not needed in production)
+/docs/
+
+# claude code settings
+.claude/

@@ -17,7 +17,10 @@
       "Bash(Remove-Item -Force \"components\\\\ui\\\\dial-input.tsx\" -ErrorAction SilentlyContinue)",
       "Bash(git diff *)",
       "Bash(dir /s /b app components lib)",
-      "Bash(findstr /E \".tsx .ts\")"
+      "Bash(findstr /E \".tsx .ts\")",
+      "Bash(find design_handoff* -type f)",
+      "Bash(ls \"c:/Users/晴輝/Documents/Life log factory/\")",
+      "Read(//c/Users/晴輝/Documents/Life log factory/**)"
     ]
   }
 }
