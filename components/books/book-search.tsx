@@ -90,7 +90,7 @@ export function BookSearch() {
             </svg>
             <input
               ref={inputRef}
-              type="search"
+              type="text"
               value={query}
               onChange={(e) => setQuery(e.target.value)}
               placeholder="例：海辺のカフカ"

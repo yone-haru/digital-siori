@@ -11,7 +11,7 @@ export async function GET(request: NextRequest) {
 
   const url = new URL(GOOGLE_BOOKS_URL);
   url.searchParams.set("q", q);
-  url.searchParams.set("maxResults", "12");
+  url.searchParams.set("maxResults", "40");
   url.searchParams.set("printType", "books");
   // API キーがあればレート制限が大幅に緩和される（無料・取得5分）
   if (process.env.GOOGLE_BOOKS_API_KEY) {

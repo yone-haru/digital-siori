@@ -1,10 +1,15 @@
 import { redirect } from "next/navigation";
 import { createServerClient } from "@/lib/supabase/server";
+import Link from "next/link";
 import { ShelfView } from "@/components/books/shelf-view";
-import { LogoutButton } from "@/components/ui/logout-button";
 import { BottomNav } from "@/components/ui/bottom-nav";
+import { UndoToast } from "@/components/books/undo-toast";
 
-export default async function ShelfPage() {
+export default async function ShelfPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ deleted?: string; title?: string }>;
+}) {
   const supabase = await createServerClient();
   const {
     data: { user },
@@ -12,12 +17,36 @@ export default async function ShelfPage() {
 
   if (!user) redirect("/auth/login");
 
-  const { data: books } = await supabase
+  const { deleted: deletedId, title: deletedTitle } = await searchParams;
+
+  let booksQuery = supabase
     .from("books")
     .select(
       "id, title, author, cover_url, current_page, total_pages, status, created_at, updated_at"
     )
     .order("updated_at", { ascending: false });
+
+  if (deletedId) {
+    booksQuery = booksQuery.neq("id", deletedId);
+  }
+
+  const [{ data: books }, { data: bookTagRows }, { data: allTagRows }] =
+    await Promise.all([
+      booksQuery,
+      supabase.from("book_tags").select("book_id, tag_id"),
+      supabase.from("tags").select("id, name").eq("user_id", user.id).order("created_at"),
+    ]);
+
+  const bookTagMap: Record<string, string[]> = {};
+  for (const row of bookTagRows ?? []) {
+    if (!bookTagMap[row.book_id]) bookTagMap[row.book_id] = [];
+    bookTagMap[row.book_id].push(row.tag_id);
+  }
+
+  const enrichedBooks = (books ?? []).map((b) => ({
+    ...b,
+    tagIds: bookTagMap[b.id] ?? [],
+  }));
 
   const initial = (user.email ?? "?")[0].toUpperCase();
 
@@ -34,13 +63,24 @@ export default async function ShelfPage() {
           </h1>
         </div>
         <div className="flex items-center gap-4 pb-1">
-          <LogoutButton className="w-8 h-8 rounded-full bg-ink flex items-center justify-center font-cormorant text-[14px] text-paper font-semibold">
+          <Link
+            href="/account"
+            className="w-8 h-8 rounded-full bg-ink flex items-center justify-center font-cormorant text-[14px] text-paper font-semibold hover:opacity-70 transition-opacity"
+            aria-label="アカウント設定"
+          >
             {initial}
-          </LogoutButton>
+          </Link>
         </div>
       </div>
 
-      <ShelfView books={books ?? []} />
+      <ShelfView books={enrichedBooks} tags={allTagRows ?? []} />
+
+      {deletedId && deletedTitle && (
+        <UndoToast
+          bookId={deletedId}
+          title={decodeURIComponent(deletedTitle)}
+        />
+      )}
 
       <BottomNav />
     </div>

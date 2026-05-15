@@ -4,6 +4,8 @@ import { useState, useMemo } from "react";
 import { BookCard } from "@/components/books/book-card";
 import type { BookStatus } from "@/lib/supabase/types";
 
+type Tag = { id: string; name: string };
+
 type Book = {
   id: string;
   title: string;
@@ -14,6 +16,7 @@ type Book = {
   status: BookStatus;
   created_at: string;
   updated_at: string;
+  tagIds: string[];
 };
 
 type FilterTab = "all" | BookStatus;
@@ -22,8 +25,8 @@ type SortKey = "updated_at" | "created_at" | "title";
 const FILTER_TABS: { key: FilterTab; label: string }[] = [
   { key: "all", label: "すべて" },
   { key: "reading", label: "読書中" },
-  { key: "to_read", label: "積読" },
-  { key: "finished", label: "読了" },
+  { key: "to_read", label: "未読" },
+  { key: "finished", label: "読書完了" },
 ];
 
 const SORT_OPTIONS: { key: SortKey; label: string }[] = [
@@ -45,9 +48,10 @@ function sorted(books: Book[], key: SortKey): Book[] {
   });
 }
 
-export function ShelfView({ books }: { books: Book[] }) {
+export function ShelfView({ books, tags }: { books: Book[]; tags: Tag[] }) {
   const [filter, setFilter] = useState<FilterTab>("all");
   const [sortKey, setSortKey] = useState<SortKey>("updated_at");
+  const [tagFilter, setTagFilter] = useState<string | null>(null);
 
   const counts = useMemo(() => {
     const c: Record<string, number> = { all: books.length };
@@ -56,9 +60,10 @@ export function ShelfView({ books }: { books: Book[] }) {
   }, [books]);
 
   const filteredBooks = useMemo(() => {
-    const base = filter === "all" ? books : books.filter((b) => b.status === filter);
+    let base = filter === "all" ? books : books.filter((b) => b.status === filter);
+    if (tagFilter) base = base.filter((b) => b.tagIds.includes(tagFilter));
     return sorted(base, sortKey);
-  }, [books, filter, sortKey]);
+  }, [books, filter, sortKey, tagFilter]);
 
   if (books.length === 0) {
     return (
@@ -104,6 +109,39 @@ export function ShelfView({ books }: { books: Book[] }) {
           );
         })}
       </div>
+
+      {/* Tag filter row */}
+      {tags.length > 0 && (
+        <div className="px-7 pt-3 pb-0">
+          <p className="font-zen text-[10px] tracking-[0.25em] text-muted uppercase mb-2">
+            タグで絞り込む
+          </p>
+          <div className="flex gap-2 overflow-x-auto scrollbar-none">
+          {tags.map((tag) => {
+            const active = tagFilter === tag.id;
+            return (
+              <button
+                key={tag.id}
+                onClick={() => setTagFilter(active ? null : tag.id)}
+                className={`px-2.5 py-1 rounded-full border text-nowrap transition-colors ${
+                  active
+                    ? "bg-ink border-ink"
+                    : "bg-transparent border-line hover:border-ink"
+                }`}
+              >
+                <span
+                  className={`font-zen text-[11px] ${
+                    active ? "text-paper" : "text-muted-2"
+                  }`}
+                >
+                  {tag.name}
+                </span>
+              </button>
+            );
+          })}
+          </div>
+        </div>
+      )}
 
       {/* Sort row */}
       <div className="flex justify-end gap-4 px-7 py-3">

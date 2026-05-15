@@ -1,6 +1,5 @@
 "use server";
 
-import { redirect } from "next/navigation";
 import { revalidatePath } from "next/cache";
 import { createServerClient } from "@/lib/supabase/server";
 import type { BookStatus } from "@/lib/supabase/types";
@@ -59,7 +58,8 @@ export async function deleteBook(bookId: string) {
 
   if (error) return { error: "削除に失敗しました" };
   revalidatePath("/shelf");
-  redirect("/shelf");
+  revalidatePath("/stats");
+  return { success: true };
 }
 
 export async function updateCurrentPage(
@@ -117,6 +117,62 @@ export async function updateBookStatus(bookId: string, status: BookStatus) {
     .eq("id", bookId);
 
   if (error) return { error: "更新に失敗しました" };
+  revalidatePath(`/books/${bookId}`);
+  revalidatePath("/shelf");
+  return { success: true };
+}
+
+export async function addTagToBook(bookId: string, tagId: string) {
+  const supabase = await createServerClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) return { error: "ログインが必要です" };
+
+  await supabase
+    .from("book_tags")
+    .insert({ book_id: bookId, tag_id: tagId, user_id: user.id });
+
+  revalidatePath(`/books/${bookId}`);
+  revalidatePath("/shelf");
+  return { success: true };
+}
+
+export async function removeTagFromBook(bookId: string, tagId: string) {
+  const supabase = await createServerClient();
+  await supabase
+    .from("book_tags")
+    .delete()
+    .eq("book_id", bookId)
+    .eq("tag_id", tagId);
+
+  revalidatePath(`/books/${bookId}`);
+  revalidatePath("/shelf");
+  return { success: true };
+}
+
+export async function createTag(bookId: string, name: string) {
+  const trimmed = name.trim().slice(0, 20);
+  if (!trimmed) return { error: "タグ名を入力してください" };
+
+  const supabase = await createServerClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) return { error: "ログインが必要です" };
+
+  const { data: tag, error } = await supabase
+    .from("tags")
+    .insert({ name: trimmed, user_id: user.id })
+    .select("id")
+    .single();
+
+  if (error || !tag) return { error: "タグの作成に失敗しました" };
+
+  await supabase
+    .from("book_tags")
+    .insert({ book_id: bookId, tag_id: tag.id, user_id: user.id });
+
   revalidatePath(`/books/${bookId}`);
   revalidatePath("/shelf");
   return { success: true };

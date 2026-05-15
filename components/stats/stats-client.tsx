@@ -411,7 +411,7 @@ function OverallTab({ overall }: { overall: OverallStats }) {
       </div>
 
       <div className="px-7 pt-4 grid grid-cols-2 gap-3 pb-6">
-        <StatCard label="Finished" value={finishedCount} sub="読了した本" />
+        <StatCard label="Finished" value={finishedCount} sub="読書完了した本" />
         <StatCard label="Reading" value={readingCount} sub="読書中の本" />
         <StatCard
           label="Pages"

@@ -65,6 +65,48 @@ export type Database = {
           }
         ];
       };
+      tags: {
+        Row: {
+          id: string;
+          user_id: string;
+          name: string;
+          created_at: string;
+        };
+        Insert: {
+          id?: string;
+          user_id?: string;
+          name: string;
+          created_at?: string;
+        };
+        Update: {
+          id?: string;
+          user_id?: string;
+          name?: string;
+          created_at?: string;
+        };
+        Relationships: [];
+      };
+      book_tags: {
+        Row: {
+          book_id: string;
+          tag_id: string;
+          user_id: string;
+          created_at: string;
+        };
+        Insert: {
+          book_id: string;
+          tag_id: string;
+          user_id?: string;
+          created_at?: string;
+        };
+        Update: {
+          book_id?: string;
+          tag_id?: string;
+          user_id?: string;
+          created_at?: string;
+        };
+        Relationships: [];
+      };
       reading_sessions: {
         Row: {
           id: string;

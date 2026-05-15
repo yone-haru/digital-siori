@@ -2,7 +2,7 @@
 
 import { useState, useOptimistic, useTransition } from "react";
 import { useRouter } from "next/navigation";
-import { updateCurrentPage, updateBookStatus, deleteBook } from "@/app/books/[id]/actions";
+import { updateCurrentPage, updateBookStatus } from "@/app/books/[id]/actions";
 import { formatDuration } from "@/lib/utils";
 import type { BookStatus } from "@/lib/supabase/types";
 
@@ -22,14 +22,13 @@ export function BookMenu({
 }) {
   const [menuOpen, setMenuOpen] = useState(false);
   const [sheetOpen, setSheetOpen] = useState(false);
-  const [isPending, startTransition] = useTransition();
   const router = useRouter();
 
   function handleDelete() {
-    startTransition(async () => {
-      await deleteBook(bookId);
-      router.push("/shelf");
-    });
+    setSheetOpen(false);
+    router.push(
+      `/shelf?deleted=${bookId}&title=${encodeURIComponent(bookTitle)}`
+    );
   }
 
   return (
@@ -70,10 +69,10 @@ export function BookMenu({
       )}
 
       {sheetOpen && (
-        <div className="fixed inset-0 z-50 flex flex-col justify-end">
+        <div className="fixed inset-0 z-[60] flex flex-col justify-end">
           <div
             className="absolute inset-0 bg-black/50"
-            onClick={() => !isPending && setSheetOpen(false)}
+            onClick={() => setSheetOpen(false)}
           />
           <div className="relative bg-paper rounded-t-2xl px-7 pb-10 pt-3 shadow-2xl">
             <div className="w-10 h-[3px] bg-line rounded-full mx-auto mb-6" />
@@ -95,21 +94,19 @@ export function BookMenu({
               <span className="font-cormorant text-[14px] text-ink">{formatDuration(totalSeconds)}</span> も
             </p>
             <p className="font-zen text-[12px] text-muted leading-relaxed mb-7">
-              すべて消えます。この操作は取り消せません。
+              すべて消えます。
             </p>
 
             <div className="flex flex-col gap-2.5">
               <button
                 onClick={handleDelete}
-                disabled={isPending}
-                className="w-full h-[50px] bg-[#C77B6F] font-zen text-[13px] tracking-[0.15em] text-white rounded-sm disabled:opacity-50 transition-opacity"
+                className="w-full h-[50px] bg-[#C77B6F] font-zen text-[13px] tracking-[0.15em] text-white rounded-sm"
               >
-                {isPending ? "削除中..." : "削除する"}
+                削除する
               </button>
               <button
                 onClick={() => setSheetOpen(false)}
-                disabled={isPending}
-                className="w-full h-[50px] border border-line font-zen text-[13px] tracking-[0.15em] text-ink rounded-sm disabled:opacity-40"
+                className="w-full h-[50px] border border-line font-zen text-[13px] tracking-[0.15em] text-ink rounded-sm"
               >
                 キャンセル
               </button>
@@ -123,8 +120,8 @@ export function BookMenu({
 
 const STATUS_LABELS: Record<BookStatus, string> = {
   reading: "読書中",
-  to_read: "積読",
-  finished: "読了",
+  to_read: "未読",
+  finished: "読書完了",
 };
 
 const NEXT_STATUSES: Record<BookStatus, BookStatus[]> = {

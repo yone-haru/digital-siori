@@ -52,7 +52,7 @@ export function ManualSessionForm({
         durationMinutes: durationMin,
       });
       if (res && "error" in res) {
-        setMessage(res.error);
+        setMessage(res.error ?? null);
       } else {
         handleClose();
         setStartPage(endPage);

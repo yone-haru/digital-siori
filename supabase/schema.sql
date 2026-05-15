@@ -97,6 +97,41 @@ create policy "sessions: 自分のレコードのみ削除可能"
   using (auth.uid() = user_id);
 
 -- ----------------------------------------------------------------
+-- 3b. tags / book_tags テーブル（タグ機能）
+-- ----------------------------------------------------------------
+create table if not exists public.tags (
+  id         uuid primary key default gen_random_uuid(),
+  user_id    uuid not null references auth.users(id) on delete cascade,
+  name       text not null check (char_length(name) <= 20),
+  created_at timestamptz not null default now()
+);
+
+create table if not exists public.book_tags (
+  book_id    uuid not null references public.books(id) on delete cascade,
+  tag_id     uuid not null references public.tags(id) on delete cascade,
+  user_id    uuid not null references auth.users(id) on delete cascade,
+  created_at timestamptz not null default now(),
+  primary key (book_id, tag_id)
+);
+
+alter table public.tags enable row level security;
+alter table public.book_tags enable row level security;
+
+create policy "tags: 自分のレコードのみ操作可能"
+  on public.tags for all
+  using (auth.uid() = user_id)
+  with check (auth.uid() = user_id);
+
+create policy "book_tags: 自分のレコードのみ操作可能"
+  on public.book_tags for all
+  using (auth.uid() = user_id)
+  with check (auth.uid() = user_id);
+
+create index if not exists tags_user_id_idx      on public.tags(user_id);
+create index if not exists book_tags_book_id_idx on public.book_tags(book_id);
+create index if not exists book_tags_tag_id_idx  on public.book_tags(tag_id);
+
+-- ----------------------------------------------------------------
 -- 4. インデックス（パフォーマンス最適化）
 -- ----------------------------------------------------------------
 create index if not exists books_user_id_idx       on public.books(user_id);

@@ -3,10 +3,12 @@ import Link from "next/link";
 import { createServerClient } from "@/lib/supabase/server";
 import { BookCover } from "@/components/books/book-cover";
 import { BottomNav } from "@/components/ui/bottom-nav";
-import { PageUpdateForm, StatusButtons, BookMenu } from "@/components/books/detail-client";
+import { StatusButtons, BookMenu } from "@/components/books/detail-client";
 import { ManualSessionForm } from "@/components/books/manual-session-form";
 import { StartReadingButton } from "@/components/books/start-reading-button";
 import { formatDuration, formatSessionDate } from "@/lib/utils";
+import { TagPicker } from "@/components/books/tag-picker";
+import type { Tag } from "@/components/books/tag-picker";
 
 export default async function BookDetailPage({
   params,
@@ -21,14 +23,33 @@ export default async function BookDetailPage({
 
   if (!user) redirect("/auth/login");
 
-  const [{ data: book }, { data: sessions }] = await Promise.all([
-    supabase.from("books").select("*").eq("id", id).single(),
-    supabase
-      .from("reading_sessions")
-      .select("*")
-      .eq("book_id", id)
-      .order("started_at", { ascending: false }),
-  ]);
+  const [{ data: book }, { data: sessions }, { data: bookTagRows }, { data: allTagRows }] =
+    await Promise.all([
+      supabase.from("books").select("*").eq("id", id).single(),
+      supabase
+        .from("reading_sessions")
+        .select("*")
+        .eq("book_id", id)
+        .order("started_at", { ascending: false }),
+      supabase
+        .from("book_tags")
+        .select("tag_id, tags(id, name)")
+        .eq("book_id", id),
+      supabase
+        .from("tags")
+        .select("id, name")
+        .eq("user_id", user.id)
+        .order("created_at"),
+    ]);
+
+  const bookTags: Tag[] = (bookTagRows ?? [])
+    .map((r) => {
+      const t = r.tags as unknown as { id: string; name: string } | null;
+      return t ? { id: t.id, name: t.name } : null;
+    })
+    .filter(Boolean) as Tag[];
+
+  const allTags: Tag[] = (allTagRows ?? []) as Tag[];
 
   if (!book) redirect("/shelf");
 
@@ -132,6 +153,11 @@ export default async function BookDetailPage({
           </div>
         </div>
 
+        {/* Tags */}
+        <div className="mb-5">
+          <TagPicker bookId={b.id} bookTags={bookTags} allTags={allTags} />
+        </div>
+
         {/* Description */}
         {b.description && (
           <p className="font-zen text-[12px] text-muted leading-[1.8] mb-6 line-clamp-4">
@@ -187,13 +213,30 @@ export default async function BookDetailPage({
           </div>
         </div>
 
-        {/* Page update */}
-        <div className="mb-6">
-          <PageUpdateForm
-            bookId={b.id}
-            currentPage={b.current_page}
-            totalPages={b.total_pages}
-          />
+        {/* Page display */}
+        <div className="flex gap-5 mb-6">
+          <div className="flex-1">
+            <p className="font-zen text-[10px] tracking-[0.25em] text-muted uppercase mb-2">
+              Current Page
+            </p>
+            <div className="flex items-baseline gap-1 border-b border-line pb-1.5">
+              <span className="font-cormorant text-[16px] text-muted-2">p.</span>
+              <span className="font-cormorant text-[28px] text-ink leading-none tracking-[-0.02em]">
+                {b.current_page}
+              </span>
+            </div>
+          </div>
+          <div className="flex-1">
+            <p className="font-zen text-[10px] tracking-[0.25em] text-muted uppercase mb-2">
+              Total Pages
+            </p>
+            <div className="flex items-baseline gap-1 border-b border-line pb-1.5">
+              <span className="font-cormorant text-[16px] text-muted-2">p.</span>
+              <span className="font-cormorant text-[28px] text-ink leading-none tracking-[-0.02em]">
+                {b.total_pages > 0 ? b.total_pages : "—"}
+              </span>
+            </div>
+          </div>
         </div>
 
         {/* Stats row */}
