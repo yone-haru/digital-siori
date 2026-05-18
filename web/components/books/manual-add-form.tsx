@@ -1,7 +1,8 @@
 "use client";
 
-import { useActionState } from "react";
+import { useActionState, useState } from "react";
 import { addBook } from "@/app/books/add/actions";
+import { DialInput } from "@/components/ui/dial-input";
 
 type ManualState = { error?: string };
 
@@ -21,6 +22,7 @@ async function addManualBook(
 
 export function ManualAddForm() {
   const [state, formAction, isPending] = useActionState(addManualBook, {});
+  const [totalPages, setTotalPages] = useState(1);
 
   return (
     <form action={formAction} className="flex flex-col gap-6 pb-8">
@@ -57,14 +59,16 @@ export function ManualAddForm() {
         <label className="block font-zen text-[10px] tracking-[0.25em] text-muted uppercase mb-2">
           Total Pages <span className="text-[#7C2B28]">*</span>
         </label>
-        <input
-          type="number"
-          name="total_pages"
-          required
-          min="1"
-          placeholder="0"
-          className="w-full bg-transparent border-b border-line pb-2.5 outline-none font-cormorant text-[19px] text-ink placeholder:text-muted-2 focus:border-ink transition-colors"
-        />
+        <div className="flex items-baseline gap-1 border-b border-line pb-2.5">
+          <span className="font-cormorant text-[16px] text-muted-2">p.</span>
+          <DialInput
+            value={totalPages}
+            onChange={setTotalPages}
+            min={1}
+            className="w-full font-cormorant text-[19px] text-ink leading-none tracking-[-0.02em]"
+          />
+        </div>
+        <input type="hidden" name="total_pages" value={totalPages} />
       </div>
 
       {/* Error */}

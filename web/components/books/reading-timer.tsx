@@ -4,29 +4,38 @@ import { useState, useEffect, useRef, useCallback } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { saveReadingSession } from "@/app/books/[id]/reading/actions";
+import { DialInput } from "@/components/ui/dial-input";
 
 const BRIGHT = "rgba(255,255,255,0.92)";
 const DIM = "rgba(255,255,255,0.55)";
+
+type PendingMemo = { pageNumber: number; content: string };
 
 type Props = {
   bookId: string;
   bookTitle: string;
   bookAuthor: string;
   startPage: number;
+  totalPages?: number;
 };
 
 type SavedResult = { durationSeconds: number; pagesRead: number };
 
-export function ReadingTimer({ bookId, bookTitle, bookAuthor, startPage }: Props) {
-  const [elapsed, setElapsed] = useState(0); // 秒
+export function ReadingTimer({ bookId, bookTitle, bookAuthor, startPage, totalPages }: Props) {
+  const [elapsed, setElapsed] = useState(0);
   const [isRunning, setIsRunning] = useState(true);
-  const [currentPage, setCurrentPage] = useState(String(startPage));
+  const [currentPage, setCurrentPage] = useState(startPage);
   const [phase, setPhase] = useState<"running" | "confirm" | "saving" | "saved">("running");
   const [error, setError] = useState<string | null>(null);
   const [savedResult, setSavedResult] = useState<SavedResult | null>(null);
-  const router = useRouter();
 
-  // マウント時刻を start とする（ref に保持してリレンダーの影響を受けない）
+  // メモ
+  const [pendingMemos, setPendingMemos] = useState<PendingMemo[]>([]);
+  const [memoOpen, setMemoOpen] = useState(false);
+  const [memoPage, setMemoPage] = useState(startPage);
+  const [memoText, setMemoText] = useState("");
+
+  const router = useRouter();
   const mountTime = useRef(Date.now());
   const startedAt = useRef(new Date().toISOString());
   const frozenElapsed = useRef(0);
@@ -46,8 +55,7 @@ export function ReadingTimer({ bookId, bookTitle, bookAuthor, startPage }: Props
   }, [elapsed]);
 
   const handleSave = useCallback(async () => {
-    const n = Number(currentPage);
-    if (!Number.isInteger(n) || n < 0) {
+    if (currentPage < 0) {
       setError("有効なページ数を入力してください");
       return;
     }
@@ -57,10 +65,11 @@ export function ReadingTimer({ bookId, bookTitle, bookAuthor, startPage }: Props
     const result = await saveReadingSession({
       bookId,
       startPage,
-      endPage: n,
+      endPage: currentPage,
       startedAt: startedAt.current,
       endedAt: new Date().toISOString(),
       durationSeconds: frozenElapsed.current,
+      memos: pendingMemos,
     });
 
     if (result && "error" in result) {
@@ -70,7 +79,20 @@ export function ReadingTimer({ bookId, bookTitle, bookAuthor, startPage }: Props
       setSavedResult({ durationSeconds: result.durationSeconds, pagesRead: result.pagesRead });
       setPhase("saved");
     }
-  }, [bookId, startPage, currentPage]);
+  }, [bookId, startPage, currentPage, pendingMemos]);
+
+  function handleOpenMemo() {
+    setMemoPage(currentPage);
+    setMemoText("");
+    setMemoOpen(true);
+  }
+
+  function handleSaveMemo() {
+    if (memoText.trim()) {
+      setPendingMemos((prev) => [...prev, { pageNumber: memoPage, content: memoText.trim() }]);
+    }
+    setMemoOpen(false);
+  }
 
   const minutes = Math.floor(elapsed / 60);
   const seconds = elapsed % 60;
@@ -152,7 +174,7 @@ export function ReadingTimer({ bookId, bookTitle, bookAuthor, startPage }: Props
       {/* ── Bottom section ── */}
       <div className="px-7 pb-8 shrink-0">
         <div
-          className="pt-5 pb-5 mb-0"
+          className="pt-5 pb-5"
           style={{ borderTop: "1px solid rgba(255,255,255,0.08)" }}
         >
           {/* Pages row */}
@@ -162,10 +184,7 @@ export function ReadingTimer({ bookId, bookTitle, bookAuthor, startPage }: Props
               <p className="font-zen text-[10px] tracking-[0.22em] text-white/35 uppercase mb-2">
                 Started At
               </p>
-              <span
-                className="font-cormorant text-[22px] font-light"
-                style={{ color: DIM }}
-              >
+              <span className="font-cormorant text-[22px] font-light" style={{ color: DIM }}>
                 p. {startPage}
               </span>
             </div>
@@ -181,33 +200,50 @@ export function ReadingTimer({ bookId, bookTitle, bookAuthor, startPage }: Props
               />
             </svg>
 
-            {/* Current page (editable) */}
+            {/* Current page */}
             <div className="text-right">
               <p className="font-zen text-[10px] tracking-[0.22em] text-white/35 uppercase mb-2">
                 {phase === "confirm" || phase === "saving" ? "終了ページ" : "Current"}
               </p>
               <div className="flex items-baseline gap-0.5 justify-end">
-                <span
-                  className="font-cormorant text-[16px] font-light"
-                  style={{ color: "rgba(255,255,255,0.35)" }}
-                >
+                <span className="font-cormorant text-[16px] font-light" style={{ color: "rgba(255,255,255,0.35)" }}>
                   p.
                 </span>
-                <input
-                  type="number"
-                  inputMode="numeric"
-                  value={currentPage}
-                  onChange={(e) => setCurrentPage(e.target.value)}
-                  disabled={phase === "saving"}
-                  className="w-16 bg-transparent outline-none text-right font-cormorant text-[28px] font-light tracking-[-0.02em] pb-0.5 disabled:opacity-60"
-                  style={{
-                    color: BRIGHT,
-                    borderBottom: "1px solid rgba(255,255,255,0.3)",
-                  }}
-                />
+                <div style={{ borderBottom: "1px solid rgba(255,255,255,0.3)" }} className="pb-0.5">
+                  <DialInput
+                    value={currentPage}
+                    onChange={setCurrentPage}
+                    min={startPage}
+                    max={totalPages && totalPages > 0 ? totalPages : undefined}
+                    disabled={phase === "saving"}
+                    className="font-cormorant text-[28px] font-light tracking-[-0.02em]"
+                    style={{ color: BRIGHT }}
+                  />
+                </div>
               </div>
             </div>
           </div>
+
+          {/* + メモ ボタン（running中のみ） */}
+          {phase === "running" && (
+            <div className="flex justify-center mt-5">
+              <button
+                onClick={handleOpenMemo}
+                className="flex items-center gap-1.5 font-zen text-[11px] tracking-[0.1em] transition-colors"
+                style={{ color: "rgba(255,255,255,0.40)" }}
+              >
+                <svg width="11" height="11" viewBox="0 0 11 11" fill="none">
+                  <path d="M5.5 1v9M1 5.5h9" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" />
+                </svg>
+                メモ
+                {pendingMemos.length > 0 && (
+                  <span className="font-cormorant text-[12px]" style={{ color: "rgba(255,255,255,0.30)" }}>
+                    {pendingMemos.length}
+                  </span>
+                )}
+              </button>
+            </div>
+          )}
         </div>
 
         {/* Error */}
@@ -243,6 +279,72 @@ export function ReadingTimer({ bookId, bookTitle, bookAuthor, startPage }: Props
           </button>
         )}
       </div>
+
+      {/* ── メモ ボトムシート ── */}
+      {memoOpen && (
+        <div className="fixed inset-0 z-50 flex flex-col justify-end">
+          <div
+            className="absolute inset-0 bg-black/50"
+            onClick={() => setMemoOpen(false)}
+          />
+          <div className="relative bg-paper rounded-t-sm px-7 pt-6 pb-10 shadow-[0_-8px_40px_rgba(0,0,0,0.2)]">
+            {/* ハンドル */}
+            <div className="w-10 h-[3px] bg-line rounded-full mx-auto mb-6" />
+
+            <p className="font-zen text-[10px] tracking-[0.25em] text-muted uppercase mb-4">
+              Memo
+            </p>
+
+            {/* ページ数 */}
+            <div className="mb-4">
+              <label className="block font-zen text-[10px] tracking-[0.25em] text-muted uppercase mb-2">
+                Page
+              </label>
+              <div className="flex items-baseline gap-1 border-b border-line pb-1.5">
+                <span className="font-cormorant text-[14px] text-muted-2">p.</span>
+                <DialInput
+                  value={memoPage}
+                  onChange={setMemoPage}
+                  min={0}
+                  max={totalPages && totalPages > 0 ? totalPages : undefined}
+                  className="w-full font-cormorant text-[24px] text-ink leading-none tracking-[-0.02em]"
+                />
+              </div>
+            </div>
+
+            {/* メモテキスト */}
+            <div className="mb-5">
+              <label className="block font-zen text-[10px] tracking-[0.25em] text-muted uppercase mb-2">
+                Note
+              </label>
+              <textarea
+                autoFocus
+                value={memoText}
+                onChange={(e) => setMemoText(e.target.value)}
+                placeholder="メモを入力..."
+                rows={4}
+                className="w-full bg-transparent outline-none resize-none font-zen text-[14px] text-ink leading-[1.8] border-b border-line pb-2 placeholder:text-muted-2"
+              />
+            </div>
+
+            {/* ボタン */}
+            <div className="flex gap-3">
+              <button
+                onClick={() => setMemoOpen(false)}
+                className="flex-1 h-[44px] border border-line font-zen text-[12px] tracking-[0.1em] text-muted rounded-sm"
+              >
+                キャンセル
+              </button>
+              <button
+                onClick={handleSaveMemo}
+                className="flex-1 h-[44px] bg-ink font-zen text-[12px] tracking-[0.1em] text-paper rounded-sm"
+              >
+                保存
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* ── Session saved modal ── */}
       {phase === "saved" && savedResult && (

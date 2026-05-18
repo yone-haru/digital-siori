@@ -2,7 +2,9 @@
 
 import { useState, useOptimistic, useTransition } from "react";
 import { useRouter } from "next/navigation";
-import { updateCurrentPage, updateBookStatus } from "@/app/books/[id]/actions";
+import { updateCurrentPage, updateBookStatus, updateBookRating, updateBookReview } from "@/app/books/[id]/actions";
+import { DialInput } from "@/components/ui/dial-input";
+import { StarRatingInput } from "@/components/ui/star-rating";
 import { formatDuration } from "@/lib/utils";
 import type { BookStatus } from "@/lib/supabase/types";
 
@@ -120,6 +122,7 @@ export function BookMenu({
 
 const STATUS_LABELS: Record<BookStatus, string> = {
   reading: "読書中",
+  rereading: "再読中",
   to_read: "未読",
   finished: "読書完了",
 };
@@ -127,7 +130,8 @@ const STATUS_LABELS: Record<BookStatus, string> = {
 const NEXT_STATUSES: Record<BookStatus, BookStatus[]> = {
   to_read: ["reading", "finished"],
   reading: ["finished", "to_read"],
-  finished: ["reading", "to_read"],
+  finished: ["rereading", "to_read"],
+  rereading: ["finished", "to_read"],
 };
 
 /* ── ページ数更新フォーム ── */
@@ -140,32 +144,21 @@ export function PageUpdateForm({
   currentPage: number;
   totalPages: number;
 }) {
-  const [value, setValue] = useState(String(currentPage));
-  const [totalValue, setTotalValue] = useState(
-    totalPages > 0 ? String(totalPages) : ""
-  );
+  const [value, setValue] = useState(currentPage);
+  const [totalValue, setTotalValue] = useState(totalPages > 0 ? totalPages : 0);
   const [isPending, startTransition] = useTransition();
   const [message, setMessage] = useState<string | null>(null);
 
   function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
-    const n = Number(value);
-    if (isNaN(n) || n < 0 || !Number.isInteger(n)) {
-      setMessage("0以上の整数を入力してください");
-      return;
-    }
-    const total = totalValue === "" ? undefined : Number(totalValue);
-    if (total !== undefined && (isNaN(total) || total < 0 || !Number.isInteger(total))) {
-      setMessage("総ページ数は0以上の整数を入力してください");
-      return;
-    }
-    if (total !== undefined && total > 0 && n > total) {
+    const total = totalValue === 0 ? undefined : totalValue;
+    if (total !== undefined && value > total) {
       setMessage(`総ページ数 ${total} を超えています`);
       return;
     }
     setMessage(null);
     startTransition(async () => {
-      const res = await updateCurrentPage(bookId, n, total);
+      const res = await updateCurrentPage(bookId, value, total);
       if (res.error) setMessage(res.error);
     });
   }
@@ -179,12 +172,12 @@ export function PageUpdateForm({
           </label>
           <div className="flex items-baseline gap-1 border-b border-line pb-1.5">
             <span className="font-cormorant text-[16px] text-muted-2">p.</span>
-            <input
-              type="number"
-              inputMode="numeric"
+            <DialInput
               value={value}
-              onChange={(e) => setValue(e.target.value)}
-              className="w-full bg-transparent outline-none font-cormorant text-[28px] text-ink leading-none tracking-[-0.02em]"
+              onChange={setValue}
+              min={0}
+              max={totalValue > 0 ? totalValue : undefined}
+              className="w-full font-cormorant text-[28px] text-ink leading-none tracking-[-0.02em]"
             />
           </div>
         </div>
@@ -194,13 +187,12 @@ export function PageUpdateForm({
           </label>
           <div className="flex items-baseline gap-1 border-b border-line pb-1.5">
             <span className="font-cormorant text-[16px] text-muted-2">p.</span>
-            <input
-              type="number"
-              inputMode="numeric"
-              placeholder="—"
+            <DialInput
               value={totalValue}
-              onChange={(e) => setTotalValue(e.target.value)}
-              className="w-full bg-transparent outline-none font-cormorant text-[28px] text-ink leading-none tracking-[-0.02em] placeholder:text-muted-2"
+              onChange={setTotalValue}
+              min={0}
+              placeholder="—"
+              className="w-full font-cormorant text-[28px] text-ink leading-none tracking-[-0.02em]"
             />
           </div>
         </div>
@@ -216,6 +208,93 @@ export function PageUpdateForm({
         <p className="font-zen text-[11px] text-[#7C2B28]">{message}</p>
       )}
     </form>
+  );
+}
+
+/* ── 評価 ── */
+export function RatingSection({
+  bookId,
+  initialRating,
+}: {
+  bookId: string;
+  initialRating: number | null;
+}) {
+  const [rating, setRating] = useState(initialRating ?? 0);
+  const [isPending, startTransition] = useTransition();
+
+  function handleChange(newRating: number) {
+    setRating(newRating);
+    startTransition(async () => {
+      await updateBookRating(bookId, newRating === 0 ? null : newRating);
+    });
+  }
+
+  return (
+    <div>
+      <p className="font-zen text-[10px] tracking-[0.25em] text-muted uppercase mb-2.5">
+        Rating
+      </p>
+      <div className="flex items-center gap-3">
+        <div className="text-ink">
+          <StarRatingInput value={rating} onChange={handleChange} disabled={isPending} />
+        </div>
+        <span className="font-cormorant text-[20px] text-ink-2 leading-none w-7">
+          {rating > 0 ? rating.toFixed(1) : ""}
+        </span>
+      </div>
+    </div>
+  );
+}
+
+/* ── 本の感想 ── */
+export function BookReviewSection({
+  bookId,
+  initialReview,
+}: {
+  bookId: string;
+  initialReview: string | null;
+}) {
+  const [review, setReview] = useState(initialReview ?? "");
+  const [editing, setEditing] = useState(false);
+  const [isPending, startTransition] = useTransition();
+
+  function handleBlur() {
+    setEditing(false);
+    startTransition(async () => {
+      await updateBookReview(bookId, review);
+    });
+  }
+
+  return (
+    <div>
+      <p className="font-zen text-[10px] tracking-[0.25em] text-muted uppercase mb-2.5">
+        Review
+      </p>
+      {editing ? (
+        <textarea
+          autoFocus
+          value={review}
+          onChange={(e) => setReview(e.target.value)}
+          onBlur={handleBlur}
+          placeholder="感想を書く..."
+          rows={5}
+          className={`w-full bg-transparent outline-none resize-none font-zen text-[13px] text-ink leading-[1.9] border-b border-line pb-2 placeholder:text-muted-2 ${isPending ? "opacity-50" : ""}`}
+        />
+      ) : (
+        <div
+          onClick={() => setEditing(true)}
+          className="cursor-text min-h-[44px] border-b border-line pb-2"
+        >
+          {review.trim() ? (
+            <p className="font-zen text-[13px] text-ink leading-[1.9] whitespace-pre-wrap">
+              {review}
+            </p>
+          ) : (
+            <p className="font-zen text-[13px] text-muted-2 leading-[1.9]">感想を書く...</p>
+          )}
+        </div>
+      )}
+    </div>
   );
 }
 

@@ -83,11 +83,8 @@ export function DialInput({
     onCommit?.(latestValue.current);
   }, [onCommit]);
 
-  // min/max の端では視覚的なスクロールを止める
-  const displayFineRatio =
-    value <= min && fineRatio < 0 ? 0 :
-    value >= max && fineRatio > 0 ? 0 :
-    fineRatio;
+  // 境界値では一切アニメーションしない
+  const displayFineRatio = (value <= min || value >= max) ? 0 : fineRatio;
 
   // ドラッグ中は桁数を開始時以上に保つ（9→10などの境界でガクつかない）
   const baseNumDigits = value <= 0 ? 1 : Math.floor(Math.log10(value)) + 1;
@@ -144,7 +141,7 @@ export function DialInput({
               <div
                 style={{
                   transform: `translateY(${columnY}px)`,
-                  transition: isDragging ? "none" : "transform 0.12s ease-out",
+                  transition: (isDragging || value <= min || value >= max) ? "none" : "transform 0.12s ease-out",
                   willChange: "transform",
                   maskImage: MASK,
                   WebkitMaskImage: MASK,

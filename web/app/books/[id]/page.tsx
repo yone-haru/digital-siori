@@ -3,7 +3,7 @@ import Link from "next/link";
 import { createServerClient } from "@/lib/supabase/server";
 import { BookCover } from "@/components/books/book-cover";
 import { BottomNav } from "@/components/ui/bottom-nav";
-import { StatusButtons, BookMenu } from "@/components/books/detail-client";
+import { StatusButtons, BookMenu, RatingSection, BookReviewSection } from "@/components/books/detail-client";
 import { ManualSessionForm } from "@/components/books/manual-session-form";
 import { StartReadingButton } from "@/components/books/start-reading-button";
 import { formatDuration, formatSessionDate } from "@/lib/utils";
@@ -23,7 +23,7 @@ export default async function BookDetailPage({
 
   if (!user) redirect("/auth/login");
 
-  const [{ data: book }, { data: sessions }, { data: bookTagRows }, { data: allTagRows }] =
+  const [{ data: book }, { data: sessions }, { data: bookTagRows }, { data: allTagRows }, { data: memoRows }] =
     await Promise.all([
       supabase.from("books").select("*").eq("id", id).single(),
       supabase
@@ -40,6 +40,10 @@ export default async function BookDetailPage({
         .select("id, name")
         .eq("user_id", user.id)
         .order("created_at"),
+      supabase
+        .from("session_memos")
+        .select("session_id, id, page_number, content")
+        .eq("book_id", id),
     ]);
 
   const bookTags: Tag[] = (bookTagRows ?? [])
@@ -60,12 +64,23 @@ export default async function BookDetailPage({
     cover_url: string | null;
     total_pages: number;
     current_page: number;
-    status: "reading" | "to_read" | "finished";
+    status: "reading" | "rereading" | "to_read" | "finished";
     description: string | null;
     started_at: string | null;
     finished_at: string | null;
     read_count: number;
+    rating: number | null;
+    review: string | null;
   };
+
+  type SessionMemo = { id: string; page_number: number; content: string };
+
+  const memosBySession = new Map<string, SessionMemo[]>();
+  for (const m of (memoRows ?? [])) {
+    const list = memosBySession.get(m.session_id) ?? [];
+    list.push({ id: m.id, page_number: m.page_number, content: m.content });
+    memosBySession.set(m.session_id, list);
+  }
 
   const pct =
     b.total_pages > 0
@@ -269,6 +284,16 @@ export default async function BookDetailPage({
           </div>
         </div>
 
+        {/* Rating */}
+        <div className="mb-6">
+          <RatingSection bookId={b.id} initialRating={b.rating} />
+        </div>
+
+        {/* Review */}
+        <div className="mb-6">
+          <BookReviewSection bookId={b.id} initialReview={b.review} />
+        </div>
+
         {/* Reading CTA */}
         <StartReadingButton
           bookId={b.id}
@@ -281,29 +306,44 @@ export default async function BookDetailPage({
           <ManualSessionForm
             bookId={b.id}
             currentPage={b.current_page}
+            totalPages={b.total_pages}
             sessionDates={sessionDates}
           />
           {sessions && sessions.length > 0 ? (
             <ul>
               {sessions.map((s) => {
                 const pagesRead = (s.end_page ?? 0) - (s.start_page ?? 0);
+                const memos = memosBySession.get(s.id) ?? [];
                 return (
-                  <li
-                    key={s.id}
-                    className="border-t border-line py-3.5 flex justify-between items-center"
-                  >
-                    <div>
-                      <p className="font-shippori text-[14px] text-ink-2 mb-0.5">
-                        {formatSessionDate(s.started_at)}
-                      </p>
-                      <p className="font-zen text-[11px] text-muted-2">
-                        p.{s.start_page} → p.{s.end_page}
-                        {pagesRead > 0 && ` · ${pagesRead}ページ`}
-                      </p>
+                  <li key={s.id} className="border-t border-line py-3.5">
+                    <div className="flex justify-between items-center">
+                      <div>
+                        <p className="font-shippori text-[14px] text-ink-2 mb-0.5">
+                          {formatSessionDate(s.started_at)}
+                        </p>
+                        <p className="font-zen text-[11px] text-muted-2">
+                          p.{s.start_page} → p.{s.end_page}
+                          {pagesRead > 0 && ` · ${pagesRead}ページ`}
+                        </p>
+                      </div>
+                      <span className="font-cormorant text-[16px] text-muted tracking-[0.02em]">
+                        {formatDuration(s.duration_seconds)}
+                      </span>
                     </div>
-                    <span className="font-cormorant text-[16px] text-muted tracking-[0.02em]">
-                      {formatDuration(s.duration_seconds)}
-                    </span>
+                    {memos.length > 0 && (
+                      <ul className="mt-2 flex flex-col gap-1">
+                        {memos.map((m) => (
+                          <li key={m.id} className="flex gap-2">
+                            <span className="font-cormorant text-[12px] text-muted-2 shrink-0">
+                              p.{m.page_number}
+                            </span>
+                            <span className="font-zen text-[12px] text-muted-2 leading-[1.7]">
+                              {m.content}
+                            </span>
+                          </li>
+                        ))}
+                      </ul>
+                    )}
                   </li>
                 );
               })}

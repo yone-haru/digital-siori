@@ -17,7 +17,7 @@ export default async function ReadingPage({
 
   const { data: book } = await supabase
     .from("books")
-    .select("id, title, author, current_page, status")
+    .select("id, title, author, current_page, total_pages, status")
     .eq("id", id)
     .single();
 
@@ -28,6 +28,7 @@ export default async function ReadingPage({
     title: string;
     author: string;
     current_page: number;
+    total_pages: number;
     status: string;
   };
 
@@ -37,6 +38,7 @@ export default async function ReadingPage({
       bookTitle={b.title}
       bookAuthor={b.author}
       startPage={b.current_page}
+      totalPages={b.total_pages}
     />
   );
 }

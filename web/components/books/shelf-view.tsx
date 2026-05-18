@@ -25,6 +25,7 @@ type SortKey = "updated_at" | "created_at" | "title";
 const FILTER_TABS: { key: FilterTab; label: string }[] = [
   { key: "all", label: "すべて" },
   { key: "reading", label: "読書中" },
+  { key: "rereading", label: "再読中" },
   { key: "to_read", label: "未読" },
   { key: "finished", label: "読書完了" },
 ];
@@ -37,6 +38,7 @@ const SORT_OPTIONS: { key: SortKey; label: string }[] = [
 
 const STATUS_SECTIONS: { status: BookStatus; label: string }[] = [
   { status: "reading", label: "Reading" },
+  { status: "rereading", label: "Re-Reading" },
   { status: "to_read", label: "To Read" },
   { status: "finished", label: "Finished" },
 ];
@@ -184,7 +186,7 @@ export function ShelfView({ books, tags }: { books: Book[]; tags: Tag[] }) {
                       coverUrl={book.cover_url}
                       currentPage={book.current_page}
                       totalPages={book.total_pages}
-                      showProgress={book.status === "reading"}
+                      showProgress={book.status === "reading" || book.status === "rereading"}
                     />
                   ))}
                 </div>
@@ -202,7 +204,7 @@ export function ShelfView({ books, tags }: { books: Book[]; tags: Tag[] }) {
                 coverUrl={book.cover_url}
                 currentPage={book.current_page}
                 totalPages={book.total_pages}
-                showProgress={book.status === "reading"}
+                showProgress={book.status === "reading" || book.status === "rereading"}
               />
             ))}
           </div>

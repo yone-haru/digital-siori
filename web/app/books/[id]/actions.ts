@@ -98,14 +98,15 @@ export async function updateBookStatus(bookId: string, status: BookStatus) {
     if (book && !book.started_at) {
       updates.started_at = new Date().toISOString();
     }
-    // 読了済みから再読：current_page をリセット
     if (book?.status === "finished") {
       updates.current_page = 0;
       updates.started_at = new Date().toISOString();
     }
+  } else if (status === "rereading") {
+    updates.current_page = 0;
+    updates.started_at = new Date().toISOString();
   } else if (status === "finished") {
     updates.finished_at = new Date().toISOString();
-    // 読書中 → 読了のときだけ読了回数を増やす
     if (book?.status === "reading") {
       updates.read_count = (book.read_count ?? 0) + 1;
     }
@@ -119,6 +120,28 @@ export async function updateBookStatus(bookId: string, status: BookStatus) {
   if (error) return { error: "更新に失敗しました" };
   revalidatePath(`/books/${bookId}`);
   revalidatePath("/shelf");
+  return { success: true };
+}
+
+export async function updateBookReview(bookId: string, review: string) {
+  const supabase = await createServerClient();
+  const { error } = await supabase
+    .from("books")
+    .update({ review: review.trim() || null })
+    .eq("id", bookId);
+  if (error) return { error: "更新に失敗しました" };
+  revalidatePath(`/books/${bookId}`);
+  return { success: true };
+}
+
+export async function updateBookRating(bookId: string, rating: number | null) {
+  const supabase = await createServerClient();
+  const { error } = await supabase
+    .from("books")
+    .update({ rating })
+    .eq("id", bookId);
+  if (error) return { error: "更新に失敗しました" };
+  revalidatePath(`/books/${bookId}`);
   return { success: true };
 }
 

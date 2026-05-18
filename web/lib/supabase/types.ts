@@ -1,4 +1,4 @@
-export type BookStatus = "reading" | "finished" | "to_read";
+export type BookStatus = "reading" | "rereading" | "finished" | "to_read";
 
 export type Database = {
   public: {
@@ -18,6 +18,8 @@ export type Database = {
           started_at: string | null;
           finished_at: string | null;
           read_count: number;
+          rating: number | null;
+          review: string | null;
           created_at: string;
           updated_at: string;
         };
@@ -35,6 +37,8 @@ export type Database = {
           started_at?: string | null;
           finished_at?: string | null;
           read_count?: number;
+          rating?: number | null;
+          review?: string | null;
           created_at?: string;
           updated_at?: string;
         };
@@ -52,6 +56,8 @@ export type Database = {
           started_at?: string | null;
           finished_at?: string | null;
           read_count?: number;
+          rating?: number | null;
+          review?: string | null;
           created_at?: string;
           updated_at?: string;
         };
@@ -82,6 +88,36 @@ export type Database = {
           id?: string;
           user_id?: string;
           name?: string;
+          created_at?: string;
+        };
+        Relationships: [];
+      };
+      session_memos: {
+        Row: {
+          id: string;
+          session_id: string;
+          book_id: string;
+          user_id: string;
+          page_number: number;
+          content: string;
+          created_at: string;
+        };
+        Insert: {
+          id?: string;
+          session_id: string;
+          book_id: string;
+          user_id?: string;
+          page_number: number;
+          content: string;
+          created_at?: string;
+        };
+        Update: {
+          id?: string;
+          session_id?: string;
+          book_id?: string;
+          user_id?: string;
+          page_number?: number;
+          content?: string;
           created_at?: string;
         };
         Relationships: [];

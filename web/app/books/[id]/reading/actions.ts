@@ -3,6 +3,8 @@
 import { revalidatePath } from "next/cache";
 import { createServerClient } from "@/lib/supabase/server";
 
+type SessionMemoInput = { pageNumber: number; content: string };
+
 type SaveSessionInput = {
   bookId: string;
   startPage: number;
@@ -10,6 +12,7 @@ type SaveSessionInput = {
   startedAt: string;
   endedAt: string;
   durationSeconds: number;
+  memos?: SessionMemoInput[];
 };
 
 type SaveSessionResult =
@@ -32,7 +35,7 @@ export async function saveReadingSession(
     .eq("id", input.bookId)
     .single();
 
-  const { error: sessionError } = await supabase
+  const { data: sessionData, error: sessionError } = await supabase
     .from("reading_sessions")
     .insert({
       book_id: input.bookId,
@@ -42,9 +45,23 @@ export async function saveReadingSession(
       start_page: input.startPage,
       end_page: input.endPage,
       duration_seconds: input.durationSeconds,
-    });
+    })
+    .select("id")
+    .single();
 
-  if (sessionError) return { error: "セッションの記録に失敗しました" };
+  if (sessionError || !sessionData) return { error: "セッションの記録に失敗しました" };
+
+  if (input.memos && input.memos.length > 0) {
+    await supabase.from("session_memos").insert(
+      input.memos.map((m) => ({
+        session_id: sessionData.id,
+        book_id: input.bookId,
+        user_id: user.id,
+        page_number: m.pageNumber,
+        content: m.content,
+      }))
+    );
+  }
 
   const updates: Record<string, unknown> = { current_page: input.endPage };
   if (book?.status === "to_read") updates.status = "reading";

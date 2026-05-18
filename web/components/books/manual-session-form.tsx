@@ -8,10 +8,12 @@ import { addManualSession } from "@/app/books/[id]/actions";
 export function ManualSessionForm({
   bookId,
   currentPage,
+  totalPages,
   sessionDates,
 }: {
   bookId: string;
   currentPage: number;
+  totalPages?: number;
   sessionDates?: string[];
 }) {
   const [open, setOpen] = useState(false);
@@ -136,6 +138,8 @@ export function ManualSessionForm({
                 <DialInput
                   value={startPage}
                   onChange={setStartPage}
+                  min={0}
+                  max={totalPages && totalPages > 0 ? totalPages : undefined}
                   className="w-full font-cormorant text-[24px] text-ink leading-none tracking-[-0.02em]"
                 />
               </div>
@@ -149,6 +153,8 @@ export function ManualSessionForm({
                 <DialInput
                   value={endPage}
                   onChange={setEndPage}
+                  min={0}
+                  max={totalPages && totalPages > 0 ? totalPages : undefined}
                   className="w-full font-cormorant text-[24px] text-ink leading-none tracking-[-0.02em]"
                 />
               </div>
