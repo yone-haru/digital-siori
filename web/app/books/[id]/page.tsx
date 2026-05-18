@@ -143,7 +143,7 @@ export default async function BookDetailPage({
       {/* Scrollable content */}
       <div className="flex-1 overflow-y-auto px-7 pb-28">
         {/* Book info row */}
-        <div className="flex gap-5 mb-7">
+        <div className="flex gap-5 mb-5">
           <BookCover
             title={b.title}
             coverUrl={b.cover_url}
@@ -172,6 +172,13 @@ export default async function BookDetailPage({
         <div className="mb-5">
           <TagPicker bookId={b.id} bookTags={bookTags} allTags={allTags} />
         </div>
+
+        {/* Reading CTA */}
+        <StartReadingButton
+          bookId={b.id}
+          isFirstEver={!sessions?.length && (b.read_count ?? 0) === 0}
+          totalPages={b.total_pages}
+        />
 
         {/* Description */}
         {b.description && (
@@ -228,32 +235,6 @@ export default async function BookDetailPage({
           </div>
         </div>
 
-        {/* Page display */}
-        <div className="flex gap-5 mb-6">
-          <div className="flex-1">
-            <p className="font-zen text-[10px] tracking-[0.25em] text-muted uppercase mb-2">
-              Current Page
-            </p>
-            <div className="flex items-baseline gap-1 border-b border-line pb-1.5">
-              <span className="font-cormorant text-[16px] text-muted-2">p.</span>
-              <span className="font-cormorant text-[28px] text-ink leading-none tracking-[-0.02em]">
-                {b.current_page}
-              </span>
-            </div>
-          </div>
-          <div className="flex-1">
-            <p className="font-zen text-[10px] tracking-[0.25em] text-muted uppercase mb-2">
-              Total Pages
-            </p>
-            <div className="flex items-baseline gap-1 border-b border-line pb-1.5">
-              <span className="font-cormorant text-[16px] text-muted-2">p.</span>
-              <span className="font-cormorant text-[28px] text-ink leading-none tracking-[-0.02em]">
-                {b.total_pages > 0 ? b.total_pages : "—"}
-              </span>
-            </div>
-          </div>
-        </div>
-
         {/* Stats row */}
         <div className="flex gap-3 mb-6">
           <div className="flex-1 bg-bg rounded-sm p-3">
@@ -293,13 +274,6 @@ export default async function BookDetailPage({
         <div className="mb-6">
           <BookReviewSection bookId={b.id} initialReview={b.review} />
         </div>
-
-        {/* Reading CTA */}
-        <StartReadingButton
-          bookId={b.id}
-          isFirstEver={!sessions?.length && (b.read_count ?? 0) === 0}
-          totalPages={b.total_pages}
-        />
 
         {/* Reading history */}
         <div>
