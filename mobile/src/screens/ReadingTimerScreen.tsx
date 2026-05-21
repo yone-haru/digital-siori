@@ -3,6 +3,7 @@ import {
   View, Text, TouchableOpacity, StyleSheet, TextInput,
   Modal, ScrollView, KeyboardAvoidingView, Platform,
 } from 'react-native';
+import { DialInput } from '../components/DialInput';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import type { RouteProp } from '@react-navigation/native';
@@ -40,7 +41,6 @@ export default function ReadingTimerScreen({ navigation, route }: Props) {
   const [memoPage, setMemoPage] = useState(startPage);
   const [memoText, setMemoText] = useState('');
   const [pendingMemos, setPendingMemos] = useState<PendingMemo[]>([]);
-  const [pageInput, setPageInput] = useState(String(startPage));
 
   const mountTime = useRef(Date.now());
   const startedAt = useRef(new Date().toISOString());
@@ -84,7 +84,7 @@ export default function ReadingTimerScreen({ navigation, route }: Props) {
       .single();
 
     if (sessionErr) {
-      setError('保存に失敗しました。');
+      setError(`保存に失敗しました: ${sessionErr.message}`);
       setPhase('confirm');
       return;
     }
@@ -101,13 +101,25 @@ export default function ReadingTimerScreen({ navigation, route }: Props) {
       );
     }
 
-    // Update current_page in books
-    const newPage = Math.max(startPage, endPage);
-    await supabase
-      .from('books')
-      .update({ current_page: newPage })
-      .eq('id', bookId)
-      .lt('current_page', newPage);
+    // Update book status and current_page
+    const isNowFinished = totalPages > 0 && endPage >= totalPages;
+    if (isNowFinished) {
+      const { data: bd } = await supabase
+        .from('books').select('read_count').eq('id', bookId).single();
+      await supabase.from('books').update({
+        status: 'finished',
+        finished_at: new Date().toISOString(),
+        read_count: (bd?.read_count ?? 0) + 1,
+        current_page: endPage,
+      }).eq('id', bookId);
+    } else {
+      const newPage = Math.max(startPage, endPage);
+      await supabase
+        .from('books')
+        .update({ current_page: newPage })
+        .eq('id', bookId)
+        .lt('current_page', newPage);
+    }
 
     setSavedDuration(durationSeconds);
     setSavedPages(Math.max(0, endPage - startPage));
@@ -120,15 +132,6 @@ export default function ReadingTimerScreen({ navigation, route }: Props) {
     }
     setMemoOpen(false);
     setMemoText('');
-  }
-
-  function handlePageInputChange(text: string) {
-    setPageInput(text);
-    const num = parseInt(text, 10);
-    if (!isNaN(num) && num >= startPage) {
-      const capped = totalPages > 0 ? Math.min(num, totalPages) : num;
-      setCurrentPage(capped);
-    }
   }
 
   const minutes = Math.floor(elapsed / 60);
@@ -184,13 +187,16 @@ export default function ReadingTimerScreen({ navigation, route }: Props) {
               </Text>
               <View style={s.pageInputRow}>
                 <Text style={s.pagePrefix}>p.</Text>
-                <TextInput
-                  style={s.pageInput}
-                  value={pageInput}
-                  onChangeText={handlePageInputChange}
-                  keyboardType="number-pad"
-                  editable={phase !== 'saving'}
-                  selectTextOnFocus
+                <DialInput
+                  value={currentPage}
+                  onChange={setCurrentPage}
+                  min={startPage}
+                  max={totalPages > 0 ? totalPages : 9999}
+                  disabled={phase === 'saving'}
+                  color={BRIGHT}
+                  fontSize={28}
+                  fontFamily={F.cormorantLight}
+                  slotHeight={40}
                 />
               </View>
             </View>
@@ -238,11 +244,15 @@ export default function ReadingTimerScreen({ navigation, route }: Props) {
               <Text style={s.memoFieldLabel}>PAGE</Text>
               <View style={s.memoPageRow}>
                 <Text style={s.memoPagePrefix}>p.</Text>
-                <TextInput
-                  style={s.memoPageInput}
-                  value={String(memoPage)}
-                  onChangeText={(t) => { const n = parseInt(t, 10); if (!isNaN(n)) setMemoPage(n); }}
-                  keyboardType="number-pad"
+                <DialInput
+                  value={memoPage}
+                  onChange={setMemoPage}
+                  min={0}
+                  max={totalPages > 0 ? totalPages : 9999}
+                  color="#0A0A0A"
+                  fontSize={24}
+                  fontFamily={F.cormorant}
+                  slotHeight={36}
                 />
               </View>
             </View>

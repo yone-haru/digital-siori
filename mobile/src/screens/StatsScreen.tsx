@@ -1,9 +1,11 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useCallback } from 'react';
 import {
   View, Text, ScrollView, TouchableOpacity, StyleSheet,
   ActivityIndicator, RefreshControl,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import { useFocusEffect } from '@react-navigation/native';
+import { CalendarPicker } from '../components/CalendarPicker';
 import { supabase } from '../lib/supabase';
 import { useAuth } from '../contexts/AuthContext';
 import { C, F } from '../lib/colors';
@@ -99,7 +101,7 @@ export default function StatsScreen() {
     });
   }, [user]);
 
-  useEffect(() => { fetchStats().finally(() => setLoading(false)); }, [fetchStats]);
+  useFocusEffect(useCallback(() => { fetchStats().finally(() => setLoading(false)); }, [fetchStats]));
 
   const onRefresh = useCallback(async () => {
     setRefreshing(true);
@@ -184,10 +186,18 @@ function TodayTab({ dayStats }: { dayStats: DayStat[] }) {
         <TouchableOpacity onPress={prevDay} disabled={dayIdx >= dayStats.length - 1} hitSlop={8}>
           <Text style={[t.navArrow, dayIdx >= dayStats.length - 1 && t.navArrowDisabled]}>‹</Text>
         </TouchableOpacity>
-        <View style={t.dateCenter}>
-          <Text style={t.dateLabel}>{day.label}</Text>
-          <Text style={t.dateSub}>{day.date}</Text>
-        </View>
+        <CalendarPicker
+          value={selectedDate}
+          onChange={setSelectedDate}
+          max={new Date(Date.now() + 9 * 3600 * 1000).toISOString().slice(0, 10)}
+          markedDates={dayStats.filter(d => d.sessions > 0).map(d => d.date)}
+          trigger={
+            <View style={t.dateCenter}>
+              <Text style={t.dateLabel}>{day.label}</Text>
+              <Text style={t.dateSub}>{day.date}</Text>
+            </View>
+          }
+        />
         <TouchableOpacity onPress={nextDay} disabled={dayIdx <= 0} hitSlop={8}>
           <Text style={[t.navArrow, dayIdx <= 0 && t.navArrowDisabled]}>›</Text>
         </TouchableOpacity>

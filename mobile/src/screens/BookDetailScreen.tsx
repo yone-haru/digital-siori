@@ -1,16 +1,20 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useCallback } from 'react';
 import {
   View, Text, ScrollView, TouchableOpacity, StyleSheet,
   TextInput, Modal, ActivityIndicator,
 } from 'react-native';
+import { DialInput } from '../components/DialInput';
+import { CalendarPicker } from '../components/CalendarPicker';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
+import { useFocusEffect } from '@react-navigation/native';
 import type { RouteProp } from '@react-navigation/native';
 import Svg, { Path, Circle } from 'react-native-svg';
 import { supabase } from '../lib/supabase';
 import { useAuth } from '../contexts/AuthContext';
 import { C, F } from '../lib/colors';
 import { formatDuration, formatSessionDate } from '../lib/utils';
+import { pendingDelete } from '../lib/pendingDelete';
 import { BookCover } from '../components/BookCover';
 import type { Book, ReadingSession, Tag, BookStatus } from '../types';
 import type { RootStackParamList } from '../types/navigation';
@@ -25,12 +29,6 @@ type MemoEntry = { content: string; pageNumber: number };
 const STATUS_LABELS: Record<BookStatus, string> = {
   reading: '読書中', rereading: '再読中', to_read: '未読', finished: '読書完了',
 };
-const NEXT_STATUSES: Record<BookStatus, BookStatus[]> = {
-  to_read: ['reading', 'finished'],
-  reading: ['finished', 'to_read'],
-  finished: ['rereading', 'to_read'],
-  rereading: ['finished', 'to_read'],
-};
 
 export default function BookDetailScreen({ navigation, route }: Props) {
   const { bookId } = route.params;
@@ -42,16 +40,19 @@ export default function BookDetailScreen({ navigation, route }: Props) {
   const [memos, setMemos] = useState<Record<string, MemoEntry[]>>({});
   const [loading, setLoading] = useState(true);
   const [deleteSheetOpen, setDeleteSheetOpen] = useState(false);
+  const [finishSheetOpen, setFinishSheetOpen] = useState(false);
+  const [finishPending, setFinishPending] = useState(false);
   const [tagSheetOpen, setTagSheetOpen] = useState(false);
   const [manualSessionOpen, setManualSessionOpen] = useState(false);
   const [startSheetOpen, setStartSheetOpen] = useState(false);
-  const [prevReadCount, setPrevReadCount] = useState('0');
-  const [initStartPage, setInitStartPage] = useState('0');
+  const [prevReadCount, setPrevReadCount] = useState(0);
+  const [initStartPage, setInitStartPage] = useState(0);
   const [initPending, setInitPending] = useState(false);
   const [review, setReview] = useState('');
   const [editingReview, setEditingReview] = useState(false);
   const [rating, setRating] = useState(0);
   const [savingReview, setSavingReview] = useState(false);
+  const [descExpanded, setDescExpanded] = useState(false);
   const [newTagName, setNewTagName] = useState('');
   const [creatingTag, setCreatingTag] = useState(false);
 
@@ -87,37 +88,19 @@ export default function BookDetailScreen({ navigation, route }: Props) {
     }
   }, [bookId, user]);
 
-  useEffect(() => { fetchData().finally(() => setLoading(false)); }, [fetchData]);
-
-  async function changeStatus(newStatus: BookStatus) {
-    if (!book) return;
-    const updates: Record<string, unknown> = { status: newStatus };
-
-    if (newStatus === 'reading') {
-      if (!book.started_at) updates.started_at = new Date().toISOString();
-      if (book.status === 'finished') {
-        updates.current_page = 0;
-        updates.started_at = new Date().toISOString();
-      }
-    } else if (newStatus === 'rereading') {
-      updates.current_page = 0;
-      updates.started_at = new Date().toISOString();
-    } else if (newStatus === 'finished') {
-      updates.finished_at = new Date().toISOString();
-      if (book.status === 'reading') {
-        updates.read_count = (book.read_count ?? 0) + 1;
-      }
-    }
-
-    setBook((prev) => prev ? { ...prev, ...updates } as Book : prev);
-    await supabase.from('books').update(updates).eq('id', bookId);
-  }
+  useFocusEffect(useCallback(() => { fetchData().finally(() => setLoading(false)); }, [fetchData]));
 
   async function saveReview() {
-    setEditingReview(false);
     setSavingReview(true);
     await supabase.from('books').update({ review: review || null }).eq('id', bookId);
+    setBook((prev) => prev ? { ...prev, review: review || null } as Book : prev);
     setSavingReview(false);
+    setEditingReview(false);
+  }
+
+  function cancelReview() {
+    setReview(book?.review ?? '');
+    setEditingReview(false);
   }
 
   async function changeRating(newRating: number) {
@@ -126,9 +109,30 @@ export default function BookDetailScreen({ navigation, route }: Props) {
     await supabase.from('books').update({ rating: val === 0 ? null : val }).eq('id', bookId);
   }
 
-  async function deleteBook() {
+  async function handleFinish() {
+    if (!book) return;
+    setFinishPending(true);
+    const newReadCount = (book.read_count ?? 0) + 1;
+    await supabase.from('books').update({
+      status: 'finished',
+      finished_at: new Date().toISOString(),
+      read_count: newReadCount,
+      current_page: book.total_pages > 0 ? book.total_pages : book.current_page,
+    }).eq('id', bookId);
+    setBook((prev) => prev ? {
+      ...prev,
+      status: 'finished',
+      finished_at: new Date().toISOString(),
+      read_count: newReadCount,
+      current_page: book.total_pages > 0 ? book.total_pages : book.current_page,
+    } as Book : prev);
+    setFinishPending(false);
+    setFinishSheetOpen(false);
+  }
+
+  function handleDeleteConfirm() {
     setDeleteSheetOpen(false);
-    await supabase.from('books').delete().eq('id', bookId);
+    pendingDelete.set({ bookId, bookTitle: book!.title });
     navigation.goBack();
   }
 
@@ -159,23 +163,44 @@ export default function BookDetailScreen({ navigation, route }: Props) {
     setCreatingTag(false);
   }
 
-  function handleStartReading() {
+  async function handleStartReading() {
     if (!book) return;
     if (isFirstEver) {
-      setPrevReadCount('0');
-      setInitStartPage('0');
+      setPrevReadCount(0);
+      setInitStartPage(0);
       setStartSheetOpen(true);
-    } else {
-      navigation.navigate('ReadingTimer', {
-        bookId: book.id, bookTitle: book.title, bookAuthor: book.author,
-        startPage: book.current_page, totalPages: book.total_pages,
-      });
+      return;
     }
+
+    let startPage = book.current_page;
+
+    if (book.status === 'finished') {
+      await supabase.from('books').update({
+        status: 'rereading',
+        current_page: 0,
+        started_at: new Date().toISOString(),
+      }).eq('id', bookId);
+      startPage = 0;
+    } else if (book.status === 'to_read') {
+      await supabase.from('books').update({
+        status: 'reading',
+        started_at: new Date().toISOString(),
+      }).eq('id', bookId);
+    }
+
+    navigation.navigate('ReadingTimer', {
+      bookId: book.id, bookTitle: book.title, bookAuthor: book.author,
+      startPage, totalPages: book.total_pages,
+    });
   }
 
-  function goFirstTime() {
+  async function goFirstTime() {
     if (!book) return;
     setStartSheetOpen(false);
+    await supabase.from('books').update({
+      status: 'reading',
+      started_at: new Date().toISOString(),
+    }).eq('id', bookId);
     navigation.navigate('ReadingTimer', {
       bookId: book.id, bookTitle: book.title, bookAuthor: book.author,
       startPage: 0, totalPages: book.total_pages,
@@ -185,11 +210,9 @@ export default function BookDetailScreen({ navigation, route }: Props) {
   async function goPrevRead() {
     if (!book) return;
     setInitPending(true);
-    const sp = parseInt(initStartPage, 10) || 0;
-    const rc = parseInt(prevReadCount, 10) || 0;
     await supabase.from('books').update({
-      read_count: rc,
-      current_page: sp,
+      read_count: prevReadCount,
+      current_page: initStartPage,
       status: 'reading',
       started_at: new Date().toISOString(),
     }).eq('id', bookId);
@@ -197,7 +220,7 @@ export default function BookDetailScreen({ navigation, route }: Props) {
     setStartSheetOpen(false);
     navigation.navigate('ReadingTimer', {
       bookId: book.id, bookTitle: book.title, bookAuthor: book.author,
-      startPage: sp, totalPages: book.total_pages,
+      startPage: initStartPage, totalPages: book.total_pages,
     });
   }
 
@@ -220,7 +243,6 @@ export default function BookDetailScreen({ navigation, route }: Props) {
     estimatedStr = formatDuration(Math.round(secPerPage * remaining));
   }
 
-  const nextStatuses = NEXT_STATUSES[book.status];
   const isFirstEver = sessions.length === 0 && (book.read_count ?? 0) === 0;
   const appliedTags = allTags.filter((t) => bookTagIds.includes(t.id));
 
@@ -276,15 +298,6 @@ export default function BookDetailScreen({ navigation, route }: Props) {
           </TouchableOpacity>
         </View>
 
-        {/* Status change buttons */}
-        <View style={s.statusButtons}>
-          {nextStatuses.map((ns) => (
-            <TouchableOpacity key={ns} style={s.statusBtn} onPress={() => changeStatus(ns)} activeOpacity={0.7}>
-              <Text style={s.statusBtnText}>{STATUS_LABELS[ns]}にする</Text>
-            </TouchableOpacity>
-          ))}
-        </View>
-
         {/* Start reading */}
         <TouchableOpacity style={s.startBtn} activeOpacity={0.85} onPress={handleStartReading}>
           <Text style={s.startBtnText}>読書をはじめる</Text>
@@ -293,9 +306,20 @@ export default function BookDetailScreen({ navigation, route }: Props) {
           </Svg>
         </TouchableOpacity>
 
+        {book.status !== 'finished' && (
+          <TouchableOpacity style={s.finishBtn} activeOpacity={0.7} onPress={() => setFinishSheetOpen(true)}>
+            <Text style={s.finishBtnText}>読了にする</Text>
+          </TouchableOpacity>
+        )}
+
         {/* Description */}
         {book.description ? (
-          <Text style={s.description} numberOfLines={4}>{book.description}</Text>
+          <TouchableOpacity onPress={() => setDescExpanded((v) => !v)} activeOpacity={0.8}>
+            <Text style={s.description} numberOfLines={descExpanded ? undefined : 4}>
+              {book.description}
+            </Text>
+            <Text style={s.descToggle}>{descExpanded ? '閉じる' : 'もっと見る'}</Text>
+          </TouchableOpacity>
         ) : null}
 
         {/* Progress */}
@@ -342,12 +366,33 @@ export default function BookDetailScreen({ navigation, route }: Props) {
         <View style={s.section}>
           <Text style={s.sectionLabel}>Rating</Text>
           <View style={s.starsRow}>
-            {[1, 2, 3, 4, 5].map((star) => (
-              <TouchableOpacity key={star} onPress={() => changeRating(star)} hitSlop={4}>
-                <Text style={[s.star, star <= rating && s.starFilled]}>★</Text>
-              </TouchableOpacity>
-            ))}
-            {rating > 0 && <Text style={s.ratingNum}>{rating}.0</Text>}
+            {[1, 2, 3, 4, 5].map((n) => {
+              const full = rating >= n;
+              const half = !full && rating >= n - 0.5;
+              return (
+                <View key={n} style={{ width: 36, height: 36, position: 'relative' }}>
+                  <Text style={s.starEmpty}>★</Text>
+                  {(full || half) && (
+                    <View style={{ position: 'absolute', left: 0, top: 0, width: full ? 36 : 18, height: 36, overflow: 'hidden' }}>
+                      <Text style={s.starFull}>★</Text>
+                    </View>
+                  )}
+                  <TouchableOpacity
+                    style={{ position: 'absolute', left: 0, top: 0, width: 18, height: 36 }}
+                    onPress={() => changeRating(rating === n - 0.5 ? 0 : n - 0.5)}
+                  />
+                  <TouchableOpacity
+                    style={{ position: 'absolute', right: 0, top: 0, width: 18, height: 36 }}
+                    onPress={() => changeRating(rating === n ? 0 : n)}
+                  />
+                </View>
+              );
+            })}
+            {rating > 0 && (
+              <Text style={s.ratingNum}>
+                {Number.isInteger(rating) ? `${rating}.0` : String(rating)}
+              </Text>
+            )}
           </View>
         </View>
 
@@ -355,23 +400,37 @@ export default function BookDetailScreen({ navigation, route }: Props) {
         <View style={s.section}>
           <Text style={s.sectionLabel}>Review</Text>
           {editingReview ? (
-            <TextInput
-              style={s.reviewInput}
-              value={review}
-              onChangeText={setReview}
-              multiline
-              autoFocus
-              placeholder="感想を書く..."
-              placeholderTextColor={C.muted2}
-              onBlur={saveReview}
-            />
+            <>
+              <TextInput
+                style={s.reviewInput}
+                value={review}
+                onChangeText={setReview}
+                multiline
+                autoFocus
+                placeholder="感想を書く..."
+                placeholderTextColor={C.muted2}
+              />
+              <View style={s.reviewActions}>
+                <TouchableOpacity onPress={cancelReview} hitSlop={8}>
+                  <Text style={s.reviewCancel}>キャンセル</Text>
+                </TouchableOpacity>
+                <TouchableOpacity
+                  style={[s.reviewSaveBtn, savingReview && { opacity: 0.5 }]}
+                  onPress={saveReview}
+                  disabled={savingReview}
+                  activeOpacity={0.8}
+                >
+                  {savingReview
+                    ? <ActivityIndicator size="small" color={C.paper} />
+                    : <Text style={s.reviewSaveBtnText}>保存</Text>}
+                </TouchableOpacity>
+              </View>
+            </>
           ) : (
             <TouchableOpacity style={s.reviewDisplay} onPress={() => setEditingReview(true)} activeOpacity={0.8}>
-              {savingReview
-                ? <ActivityIndicator size="small" color={C.muted} />
-                : <Text style={[s.reviewText, !review.trim() && s.reviewPlaceholder]}>
-                    {review.trim() || '感想を書く...'}
-                  </Text>}
+              <Text style={[s.reviewText, !review.trim() && s.reviewPlaceholder]}>
+                {review.trim() || '感想を書く...'}
+              </Text>
             </TouchableOpacity>
           )}
         </View>
@@ -440,7 +499,16 @@ export default function BookDetailScreen({ navigation, route }: Props) {
             <View style={[{ flex: 1 }, s.manualFieldLeft]}>
               <Text style={s.manualLabel}>読了回数</Text>
               <View style={s.manualPageRow}>
-                <TextInput style={s.manualInput} value={prevReadCount} onChangeText={setPrevReadCount} keyboardType="number-pad" />
+                <DialInput
+                  value={prevReadCount}
+                  onChange={setPrevReadCount}
+                  min={0}
+                  max={99}
+                  color={C.ink}
+                  fontSize={22}
+                  fontFamily={F.cormorant}
+                  slotHeight={36}
+                />
                 <Text style={s.manualPageUnit}>回</Text>
               </View>
             </View>
@@ -448,7 +516,16 @@ export default function BookDetailScreen({ navigation, route }: Props) {
               <Text style={s.manualLabel}>現在のページ</Text>
               <View style={s.manualPageRow}>
                 <Text style={s.manualPageUnit}>p.</Text>
-                <TextInput style={[s.manualInput, { flex: 1 }]} value={initStartPage} onChangeText={setInitStartPage} keyboardType="number-pad" />
+                <DialInput
+                  value={initStartPage}
+                  onChange={setInitStartPage}
+                  min={0}
+                  max={book.total_pages > 0 ? book.total_pages : 9999}
+                  color={C.ink}
+                  fontSize={22}
+                  fontFamily={F.cormorant}
+                  slotHeight={36}
+                />
               </View>
             </View>
           </View>
@@ -461,6 +538,38 @@ export default function BookDetailScreen({ navigation, route }: Props) {
             {initPending
               ? <ActivityIndicator color={C.ink} />
               : <Text style={s.cancelBtnText}>前回の続きから読む</Text>}
+          </TouchableOpacity>
+        </View>
+      </Modal>
+
+      {/* Finish confirmation sheet */}
+      <Modal visible={finishSheetOpen} transparent animationType="slide">
+        <TouchableOpacity style={s.overlay} activeOpacity={1} onPress={() => setFinishSheetOpen(false)} />
+        <View style={s.sheet}>
+          <View style={s.sheetHandle} />
+          <View style={s.sheetBookInfo}>
+            <Text style={s.sheetAuthor}>{book.author}</Text>
+            <Text style={s.sheetTitle}>{book.title}</Text>
+          </View>
+          <Text style={s.sheetHeading}>読書を完了しますか？</Text>
+          <Text style={s.sheetSub}>
+            読了回数が <Text style={s.sheetNum}>{(book.read_count ?? 0) + 1}</Text> 回になります。
+            {book.total_pages > 0 && book.current_page < book.total_pages
+              ? `\n現在 p.${book.current_page} / ${book.total_pages} ですが完了として記録されます。`
+              : ''}
+          </Text>
+          <TouchableOpacity
+            style={[s.saveBtn, finishPending && { opacity: 0.5 }]}
+            onPress={handleFinish}
+            disabled={finishPending}
+            activeOpacity={0.8}
+          >
+            {finishPending
+              ? <ActivityIndicator color={C.paper} />
+              : <Text style={s.saveBtnText}>完了にする</Text>}
+          </TouchableOpacity>
+          <TouchableOpacity style={s.cancelBtn} onPress={() => setFinishSheetOpen(false)} activeOpacity={0.8}>
+            <Text style={s.cancelBtnText}>キャンセル</Text>
           </TouchableOpacity>
         </View>
       </Modal>
@@ -479,7 +588,7 @@ export default function BookDetailScreen({ navigation, route }: Props) {
             読書履歴 <Text style={s.sheetNum}>{sessions.length}</Text> 件、累計時間{' '}
             <Text style={s.sheetNum}>{formatDuration(totalSeconds)}</Text> もすべて消えます。
           </Text>
-          <TouchableOpacity style={s.deleteBtn} onPress={deleteBook} activeOpacity={0.8}>
+          <TouchableOpacity style={s.deleteBtn} onPress={handleDeleteConfirm} activeOpacity={0.8}>
             <Text style={s.deleteBtnText}>削除する</Text>
           </TouchableOpacity>
           <TouchableOpacity style={s.cancelBtn} onPress={() => setDeleteSheetOpen(false)} activeOpacity={0.8}>
@@ -539,6 +648,9 @@ export default function BookDetailScreen({ navigation, route }: Props) {
           userId={user?.id ?? ''}
           currentPage={book.current_page}
           totalPages={book.total_pages}
+          bookStatus={book.status}
+          readCount={book.read_count ?? 0}
+          sessionDates={sessions.map(s => s.started_at.slice(0, 10))}
           onSave={async () => {
             setManualSessionOpen(false);
             await fetchData();
@@ -551,39 +663,61 @@ export default function BookDetailScreen({ navigation, route }: Props) {
 }
 
 function ManualSessionSheet({
-  bookId, userId, currentPage, totalPages, onSave, onCancel,
-}: { bookId: string; userId: string; currentPage: number; totalPages: number; onSave: () => void; onCancel: () => void }) {
+  bookId, userId, currentPage, totalPages, bookStatus, readCount, sessionDates, onSave, onCancel,
+}: {
+  bookId: string; userId: string; currentPage: number; totalPages: number;
+  bookStatus: string; readCount: number; sessionDates?: string[];
+  onSave: () => void; onCancel: () => void;
+}) {
   const today = new Date(Date.now() + 9 * 3600 * 1000).toISOString().slice(0, 10);
   const [date, setDate] = useState(today);
-  const [startPage, setStartPage] = useState(String(currentPage));
-  const [endPage, setEndPage] = useState('');
-  const [durationMin, setDurationMin] = useState('30');
+  const [startPage, setStartPage] = useState(currentPage);
+  const [endPage, setEndPage] = useState(currentPage);
+  const [durationMin, setDurationMin] = useState(30);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   async function handleSave() {
-    const sp = parseInt(startPage, 10);
-    const ep = parseInt(endPage, 10);
-    const mins = parseInt(durationMin, 10) || 0;
-    if (isNaN(sp) || isNaN(ep) || ep < sp) {
+    if (endPage < startPage) {
       setError('終了ページは開始ページ以上にしてください'); return;
     }
-    if (mins < 1) { setError('読書時間は1分以上にしてください'); return; }
+    if (durationMin < 1) { setError('読書時間は1分以上にしてください'); return; }
     setSaving(true);
     setError(null);
     const startedAt = new Date(`${date}T12:00:00+09:00`).toISOString();
-    const endedAt = new Date(new Date(startedAt).getTime() + mins * 60 * 1000).toISOString();
+    const endedAt = new Date(new Date(startedAt).getTime() + durationMin * 60 * 1000).toISOString();
     const { error: e1 } = await supabase.from('reading_sessions').insert({
       book_id: bookId, user_id: userId,
       started_at: startedAt, ended_at: endedAt,
-      start_page: sp, end_page: ep, duration_seconds: mins * 60,
+      start_page: startPage, end_page: endPage, duration_seconds: durationMin * 60,
     });
-    if (!e1 && ep > currentPage) {
-      await supabase.from('books').update({ current_page: ep }).eq('id', bookId).lt('current_page', ep);
+    if (e1) { setSaving(false); setError('保存に失敗しました'); return; }
+
+    const isNowFinished = totalPages > 0 && endPage >= totalPages;
+    const bookUpdates: Record<string, unknown> = {};
+
+    if (isNowFinished) {
+      bookUpdates.status = 'finished';
+      bookUpdates.finished_at = startedAt;
+      bookUpdates.read_count = readCount + 1;
+      bookUpdates.current_page = endPage;
+    } else if (bookStatus === 'to_read') {
+      bookUpdates.status = 'reading';
+      bookUpdates.started_at = startedAt;
+      if (endPage > currentPage) bookUpdates.current_page = endPage;
+    } else if (bookStatus === 'finished') {
+      bookUpdates.status = 'rereading';
+      bookUpdates.started_at = startedAt;
+      bookUpdates.current_page = endPage;
+    } else {
+      if (endPage > currentPage) bookUpdates.current_page = endPage;
+    }
+
+    if (Object.keys(bookUpdates).length > 0) {
+      await supabase.from('books').update(bookUpdates).eq('id', bookId);
     }
     setSaving(false);
-    if (e1) setError('保存に失敗しました');
-    else onSave();
+    onSave();
   }
 
   return (
@@ -596,7 +730,19 @@ function ManualSessionSheet({
         <View style={s.manualRow}>
           <View style={{ flex: 1 }}>
             <Text style={s.manualLabel}>DATE</Text>
-            <TextInput style={s.manualInput} value={date} onChangeText={setDate} placeholder={today} placeholderTextColor={C.muted2} />
+            <CalendarPicker
+              value={date}
+              onChange={setDate}
+              max={today}
+              markedDates={sessionDates}
+              trigger={
+                <View style={{ borderBottomWidth: 1, borderBottomColor: C.line, paddingBottom: 4 }}>
+                  <Text style={{ fontFamily: F.cormorant, fontSize: 22, color: C.ink }}>
+                    {`${date.slice(0, 4)}年${parseInt(date.slice(5, 7))}月${parseInt(date.slice(8, 10))}日`}
+                  </Text>
+                </View>
+              }
+            />
           </View>
         </View>
         <View style={s.manualRow}>
@@ -604,14 +750,32 @@ function ManualSessionSheet({
             <Text style={s.manualLabel}>開始ページ</Text>
             <View style={s.manualPageRow}>
               <Text style={s.manualPageUnit}>p.</Text>
-              <TextInput style={[s.manualInput, { flex: 1 }]} value={startPage} onChangeText={setStartPage} keyboardType="number-pad" />
+              <DialInput
+                value={startPage}
+                onChange={setStartPage}
+                min={0}
+                max={totalPages > 0 ? totalPages : 9999}
+                color={C.ink}
+                fontSize={22}
+                fontFamily={F.cormorant}
+                slotHeight={36}
+              />
             </View>
           </View>
           <View style={{ flex: 1 }}>
             <Text style={s.manualLabel}>終了ページ</Text>
             <View style={s.manualPageRow}>
               <Text style={s.manualPageUnit}>p.</Text>
-              <TextInput style={[s.manualInput, { flex: 1 }]} value={endPage} onChangeText={setEndPage} keyboardType="number-pad" placeholder={totalPages > 0 ? String(totalPages) : '120'} placeholderTextColor={C.muted2} />
+              <DialInput
+                value={endPage}
+                onChange={setEndPage}
+                min={0}
+                max={totalPages > 0 ? totalPages : 9999}
+                color={C.ink}
+                fontSize={22}
+                fontFamily={F.cormorant}
+                slotHeight={36}
+              />
             </View>
           </View>
         </View>
@@ -619,7 +783,16 @@ function ManualSessionSheet({
           <View style={{ flex: 1 }}>
             <Text style={s.manualLabel}>Duration</Text>
             <View style={s.manualPageRow}>
-              <TextInput style={[s.manualInput, { width: 56 }]} value={durationMin} onChangeText={setDurationMin} keyboardType="number-pad" />
+              <DialInput
+                value={durationMin}
+                onChange={setDurationMin}
+                min={1}
+                max={600}
+                color={C.ink}
+                fontSize={22}
+                fontFamily={F.cormorant}
+                slotHeight={36}
+              />
               <Text style={s.manualPageUnit}>min</Text>
             </View>
           </View>
@@ -665,10 +838,16 @@ const s = StyleSheet.create({
   statusBtnText: { fontFamily: F.zen, fontSize: 11, color: C.ink },
   startBtn: {
     flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8,
-    height: 52, backgroundColor: C.ink, borderRadius: 2, marginBottom: 20,
+    height: 52, backgroundColor: C.ink, borderRadius: 2, marginBottom: 10,
   },
   startBtnText: { fontFamily: F.zen, fontSize: 13, letterSpacing: 1.5, color: C.paper, textTransform: 'uppercase' },
-  description: { fontFamily: F.zen, fontSize: 12, color: C.muted, lineHeight: 22, marginBottom: 20 },
+  finishBtn: {
+    height: 40, borderWidth: 1, borderColor: C.line, borderRadius: 2,
+    alignItems: 'center', justifyContent: 'center', marginBottom: 20,
+  },
+  finishBtnText: { fontFamily: F.zen, fontSize: 12, letterSpacing: 1.5, color: C.muted },
+  description: { fontFamily: F.zen, fontSize: 12, color: C.muted, lineHeight: 22, marginBottom: 6 },
+  descToggle: { fontFamily: F.zen, fontSize: 11, color: C.muted2, marginBottom: 20 },
   progressCard: { backgroundColor: C.line2, borderRadius: 2, padding: 20, marginBottom: 16 },
   progressTop: { flexDirection: 'row', justifyContent: 'space-between', marginBottom: 12 },
   progressLabel: { fontFamily: F.zen, fontSize: 10, letterSpacing: 2.5, color: C.muted, textTransform: 'uppercase', marginBottom: 4 },
@@ -692,10 +871,14 @@ const s = StyleSheet.create({
   sectionHeadRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 },
   addSessionText: { fontFamily: F.zen, fontSize: 11, color: C.muted2 },
   starsRow: { flexDirection: 'row', alignItems: 'center', gap: 4 },
-  star: { fontSize: 24, color: C.line },
-  starFilled: { color: C.ink },
+  starEmpty: { position: 'absolute', left: 0, top: 0, width: 36, textAlign: 'center', fontSize: 32, color: C.line, lineHeight: 36 },
+  starFull: { width: 36, textAlign: 'center', fontSize: 32, color: C.ink, lineHeight: 36 },
   ratingNum: { fontFamily: F.cormorant, fontSize: 20, color: C.ink2, marginLeft: 8 },
-  reviewDisplay: { borderBottomWidth: 1, borderBottomColor: C.line, paddingBottom: 8, minHeight: 44 },
+  reviewDisplay: { borderBottomWidth: 1, borderBottomColor: C.line, paddingBottom: 8 },
+  reviewActions: { flexDirection: 'row', justifyContent: 'flex-end', alignItems: 'center', gap: 12, marginTop: 10 },
+  reviewCancel: { fontFamily: F.zen, fontSize: 12, color: C.muted2 },
+  reviewSaveBtn: { paddingHorizontal: 16, paddingVertical: 7, backgroundColor: C.ink, borderRadius: 2 },
+  reviewSaveBtnText: { fontFamily: F.zen, fontSize: 12, letterSpacing: 1, color: C.paper },
   reviewInput: {
     fontFamily: F.zen, fontSize: 13, color: C.ink, lineHeight: 24,
     borderBottomWidth: 1, borderBottomColor: C.line, paddingBottom: 8,

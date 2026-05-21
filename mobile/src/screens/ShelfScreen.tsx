@@ -1,15 +1,16 @@
-import React, { useState, useEffect, useCallback, useMemo } from 'react';
+import React, { useState, useCallback, useMemo, useEffect, useRef } from 'react';
 import {
   View, Text, ScrollView, TouchableOpacity, StyleSheet,
   Image, RefreshControl, ActivityIndicator, useWindowDimensions,
 } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
-import { useNavigation } from '@react-navigation/native';
+import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
+import { useNavigation, useFocusEffect } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { supabase } from '../lib/supabase';
 import { useAuth } from '../contexts/AuthContext';
 import { C, F } from '../lib/colors';
 import { bookColor } from '../lib/utils';
+import { pendingDelete } from '../lib/pendingDelete';
 import type { BookStatus } from '../types';
 import type { RootStackParamList } from '../types/navigation';
 
@@ -52,6 +53,7 @@ export default function ShelfScreen() {
   const nav = useNavigation<Nav>();
   const { user } = useAuth();
   const { width: screenWidth } = useWindowDimensions();
+  const insets = useSafeAreaInsets();
   const cardW = Math.floor((screenWidth - H_PAD * 2 - CARD_GAP * 2) / 3);
 
   const [books, setBooks] = useState<Book[]>([]);
@@ -61,6 +63,7 @@ export default function ShelfScreen() {
   const [filter, setFilter] = useState<FilterTab>('all');
   const [sortKey, setSortKey] = useState<SortKey>('updated_at');
   const [tagFilter, setTagFilter] = useState<string | null>(null);
+  const [deletedBook, setDeletedBook] = useState<{ bookId: string; bookTitle: string } | null>(null);
 
   const fetchData = useCallback(async () => {
     if (!user) return;
@@ -79,7 +82,11 @@ export default function ShelfScreen() {
     setTags(tagRows ?? []);
   }, [user]);
 
-  useEffect(() => { fetchData().finally(() => setLoading(false)); }, [fetchData]);
+  useFocusEffect(useCallback(() => {
+    const pending = pendingDelete.get();
+    setDeletedBook(pending);
+    fetchData().finally(() => setLoading(false));
+  }, [fetchData]));
 
   const onRefresh = useCallback(async () => {
     setRefreshing(true);
@@ -87,20 +94,25 @@ export default function ShelfScreen() {
     setRefreshing(false);
   }, [fetchData]);
 
+  const visibleBooks = useMemo(
+    () => deletedBook ? books.filter((b) => b.id !== deletedBook.bookId) : books,
+    [books, deletedBook],
+  );
+
   const counts = useMemo(() => {
-    const c: Record<string, number> = { all: books.length };
-    for (const b of books) c[b.status] = (c[b.status] ?? 0) + 1;
+    const c: Record<string, number> = { all: visibleBooks.length };
+    for (const b of visibleBooks) c[b.status] = (c[b.status] ?? 0) + 1;
     return c;
-  }, [books]);
+  }, [visibleBooks]);
 
   const sorted = useMemo(() => {
-    let base = filter === 'all' ? books : books.filter((b) => b.status === filter);
+    let base = filter === 'all' ? visibleBooks : visibleBooks.filter((b) => b.status === filter);
     if (tagFilter) base = base.filter((b) => b.tagIds.includes(tagFilter));
     return [...base].sort((a, b) => {
       if (sortKey === 'title') return a.title.localeCompare(b.title, 'ja');
       return new Date(b[sortKey]).getTime() - new Date(a[sortKey]).getTime();
     });
-  }, [books, filter, sortKey, tagFilter]);
+  }, [visibleBooks, filter, sortKey, tagFilter]);
 
   if (loading) {
     return (
@@ -111,6 +123,7 @@ export default function ShelfScreen() {
   }
 
   const initial = (user?.email ?? '?')[0].toUpperCase();
+  const avatarUrl = user?.user_metadata?.avatar_url as string | undefined;
 
   return (
     <SafeAreaView style={s.container} edges={['top']}>
@@ -124,7 +137,9 @@ export default function ShelfScreen() {
           onPress={() => nav.navigate('Account')}
           activeOpacity={0.7}
         >
-          <Text style={s.avatarText}>{initial}</Text>
+          {avatarUrl
+            ? <Image source={{ uri: avatarUrl }} style={s.avatarImg} />
+            : <Text style={s.avatarText}>{initial}</Text>}
         </TouchableOpacity>
       </View>
 
@@ -180,7 +195,7 @@ export default function ShelfScreen() {
         </View>
 
         {/* Books */}
-        {books.length === 0 ? (
+        {visibleBooks.length === 0 ? (
           <View style={s.empty}>
             <Text style={s.emptyTitle}>本棚はまだ空です</Text>
             <Text style={s.emptySub}>下の + ボタンから本を追加してください</Text>
@@ -215,7 +230,45 @@ export default function ShelfScreen() {
 
         <View style={{ height: 32 }} />
       </ScrollView>
+
+      {deletedBook && (
+        <UndoToast
+          title={deletedBook.bookTitle}
+          bottom={49 + insets.bottom + 12}
+          onTimeout={async () => {
+            await supabase.from('books').delete().eq('id', deletedBook.bookId);
+            pendingDelete.clear();
+            setDeletedBook(null);
+          }}
+          onUndo={() => {
+            pendingDelete.clear();
+            setDeletedBook(null);
+            nav.navigate('BookDetail', { bookId: deletedBook.bookId });
+          }}
+        />
+      )}
     </SafeAreaView>
+  );
+}
+
+function UndoToast({
+  title, bottom, onTimeout, onUndo,
+}: { title: string; bottom: number; onTimeout: () => void; onUndo: () => void }) {
+  const onTimeoutRef = useRef(onTimeout);
+  onTimeoutRef.current = onTimeout;
+
+  useEffect(() => {
+    const id = setTimeout(() => onTimeoutRef.current(), 5000);
+    return () => clearTimeout(id);
+  }, []);
+
+  return (
+    <View style={[s.undoToast, { bottom }]}>
+      <Text style={s.undoToastText} numberOfLines={1}>「{title}」を削除しました</Text>
+      <TouchableOpacity onPress={onUndo} hitSlop={8}>
+        <Text style={s.undoBtn}>元に戻す</Text>
+      </TouchableOpacity>
+    </View>
   );
 }
 
@@ -296,8 +349,9 @@ const s = StyleSheet.create({
   headerTitle: { fontFamily: F.shippori, fontSize: 30, color: C.ink },
   avatar: {
     width: 32, height: 32, borderRadius: 16, backgroundColor: C.ink,
-    alignItems: 'center', justifyContent: 'center',
+    alignItems: 'center', justifyContent: 'center', overflow: 'hidden',
   },
+  avatarImg: { width: 32, height: 32, borderRadius: 16 },
   avatarText: { fontFamily: F.cormorant, fontSize: 14, color: C.paper, fontWeight: '600' },
   filterTab: {
     flexDirection: 'row', alignItems: 'center', gap: 6,
@@ -349,4 +403,17 @@ const s = StyleSheet.create({
   progPct: { fontFamily: F.cormorant, fontSize: 14, color: C.ink2 },
   progPctUnit: { fontFamily: F.zen, fontSize: 9, color: C.muted2 },
   progPage: { fontFamily: F.cormorant, fontSize: 12, color: C.muted },
+  undoToast: {
+    position: 'absolute', left: 20, right: 20,
+    backgroundColor: C.ink, borderRadius: 2,
+    flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
+    gap: 14, paddingHorizontal: 18, paddingVertical: 14,
+    shadowColor: '#000', shadowOffset: { width: 0, height: 12 },
+    shadowOpacity: 0.25, shadowRadius: 32, elevation: 12,
+  },
+  undoToastText: { fontFamily: F.shippori, fontSize: 13, color: C.paper, flex: 1 },
+  undoBtn: {
+    fontFamily: F.zen, fontSize: 11, letterSpacing: 1.8, color: C.paper,
+    borderBottomWidth: 1, borderBottomColor: C.paper, paddingBottom: 1,
+  },
 });

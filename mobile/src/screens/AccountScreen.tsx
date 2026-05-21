@@ -1,11 +1,12 @@
 import React, { useState } from 'react';
 import {
   View, Text, TextInput, TouchableOpacity, StyleSheet,
-  Alert, ActivityIndicator, ScrollView, Modal,
+  Alert, ActivityIndicator, ScrollView, Modal, Image,
 } from 'react-native';
+import * as ImagePicker from 'expo-image-picker';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
-import Svg, { Path } from 'react-native-svg';
+import Svg, { Path, Circle } from 'react-native-svg';
 import { supabase } from '../lib/supabase';
 import { useAuth } from '../contexts/AuthContext';
 import { F } from '../lib/colors';
@@ -37,11 +38,20 @@ export default function AccountScreen({ navigation }: Props) {
   const [name, setName] = useState<string>(
     (user?.user_metadata?.display_name as string) ?? user?.email?.split('@')[0] ?? ''
   );
+  const [avatarUrl, setAvatarUrl] = useState<string | null>(
+    (user?.user_metadata?.avatar_url as string) ?? null
+  );
+  const [uploadingAvatar, setUploadingAvatar] = useState(false);
   const [editingName, setEditingName] = useState(false);
   const [savingName, setSavingName] = useState(false);
   const [deleteSheetOpen, setDeleteSheetOpen] = useState(false);
   const [deleteConfirmText, setDeleteConfirmText] = useState('');
   const [deleting, setDeleting] = useState(false);
+  const [pwSheetOpen, setPwSheetOpen] = useState(false);
+  const [currentPassword, setCurrentPassword] = useState('');
+  const [newPassword, setNewPassword] = useState('');
+  const [confirmPassword, setConfirmPassword] = useState('');
+  const [savingPassword, setSavingPassword] = useState(false);
 
   const email = user?.email ?? '';
   const avatarColor = user?.id ? getAvatarColor(user.id) : AVATAR_COLORS[0];
@@ -55,6 +65,89 @@ export default function AccountScreen({ navigation }: Props) {
     setSavingName(true);
     await supabase.auth.updateUser({ data: { display_name: trimmed } });
     setSavingName(false);
+  }
+
+  async function handlePickAvatar() {
+    const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
+    if (status !== 'granted') {
+      Alert.alert('権限が必要です', 'フォトライブラリへのアクセスを許可してください。');
+      return;
+    }
+    const result = await ImagePicker.launchImageLibraryAsync({
+      mediaTypes: ['images'],
+      allowsEditing: true,
+      aspect: [1, 1],
+      quality: 0.8,
+      base64: true,
+    });
+    if (result.canceled || !result.assets[0] || !user) return;
+
+    const asset = result.assets[0];
+    if (!asset.base64) return;
+
+    setUploadingAvatar(true);
+    try {
+      const ext = asset.uri.split('.').pop()?.toLowerCase() ?? 'jpg';
+      const mimeType = ext === 'png' ? 'image/png' : 'image/jpeg';
+      const path = `${user.id}/avatar.${ext}`;
+
+      const binaryStr = atob(asset.base64);
+      const bytes = new Uint8Array(binaryStr.length);
+      for (let i = 0; i < binaryStr.length; i++) {
+        bytes[i] = binaryStr.charCodeAt(i);
+      }
+
+      const { data, error } = await supabase.storage
+        .from('avatars')
+        .upload(path, bytes, { contentType: mimeType, upsert: true });
+      if (error || !data) throw new Error(error?.message ?? 'upload failed');
+      const { data: urlData } = supabase.storage.from('avatars').getPublicUrl(data.path);
+      const url = `${urlData.publicUrl}?t=${Date.now()}`;
+      await supabase.auth.updateUser({ data: { avatar_url: url } });
+      setAvatarUrl(url);
+    } catch (e: any) {
+      Alert.alert('エラー', e?.message ?? 'アイコンの更新に失敗しました。');
+    } finally {
+      setUploadingAvatar(false);
+    }
+  }
+
+  function translatePwError(msg: string): string {
+    if (msg.includes('different from the old password')) return '新しいパスワードは現在のパスワードと異なるものを設定してください。';
+    if (msg.includes('at least 6 characters')) return 'パスワードは6文字以上で設定してください。';
+    if (msg.includes('Auth session missing')) return 'セッションが切れました。再度ログインしてください。';
+    if (msg.includes('Invalid login credentials') || msg.includes('invalid_credentials')) return '現在のパスワードが正しくありません。';
+    if (msg.includes('Too many requests')) return 'しばらく時間をおいてから再試行してください。';
+    return 'パスワードの変更に失敗しました。';
+  }
+
+  async function handleChangePassword() {
+    if (!currentPassword) {
+      Alert.alert('エラー', '現在のパスワードを入力してください。');
+      return;
+    }
+    if (newPassword.length < 6) {
+      Alert.alert('エラー', '新しいパスワードは6文字以上で設定してください。');
+      return;
+    }
+    if (newPassword !== confirmPassword) {
+      Alert.alert('エラー', '確認用パスワードが一致しません。');
+      return;
+    }
+    setSavingPassword(true);
+    try {
+      const { error: signInError } = await supabase.auth.signInWithPassword({ email, password: currentPassword });
+      if (signInError) throw new Error(translatePwError(signInError.message));
+      const { error } = await supabase.auth.updateUser({ password: newPassword });
+      if (error) throw new Error(translatePwError(error.message));
+      setPwSheetOpen(false);
+      setCurrentPassword(''); setNewPassword(''); setConfirmPassword('');
+      Alert.alert('完了', 'パスワードを変更しました。');
+    } catch (e: any) {
+      Alert.alert('エラー', e?.message ?? 'パスワードの変更に失敗しました。');
+    } finally {
+      setSavingPassword(false);
+    }
   }
 
   function confirmLogout() {
@@ -88,9 +181,26 @@ export default function AccountScreen({ navigation }: Props) {
       <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={s.scroll}>
         {/* Hero */}
         <View style={s.heroSection}>
-          <View style={[s.avatar, { backgroundColor: avatarColor }]}>
-            <Text style={s.avatarText}>{initial}</Text>
-          </View>
+          <TouchableOpacity onPress={handlePickAvatar} activeOpacity={0.8} style={s.avatarWrap}>
+            <View style={[s.avatar, { backgroundColor: avatarColor }]}>
+              {avatarUrl
+                ? <Image source={{ uri: avatarUrl }} style={s.avatarImg} />
+                : <Text style={s.avatarText}>{initial}</Text>}
+            </View>
+            {uploadingAvatar
+              ? (
+                <View style={s.avatarOverlay}>
+                  <ActivityIndicator color={W92} size="small" />
+                </View>
+              ) : (
+                <View style={s.avatarOverlay}>
+                  <Svg width="20" height="20" viewBox="0 0 24 24" fill="none">
+                    <Path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z" stroke={W92} strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round" />
+                    <Circle cx="12" cy="13" r="4" stroke={W92} strokeWidth="1.4" />
+                  </Svg>
+                </View>
+              )}
+          </TouchableOpacity>
           <Text style={s.heroName}>{displayName}</Text>
           <Text style={s.heroEmail}>{email}</Text>
         </View>
@@ -138,6 +248,14 @@ export default function AccountScreen({ navigation }: Props) {
               <Text style={s.rowValue}>{email}</Text>
             </View>
           </View>
+          <View style={s.rowDivider} />
+          <TouchableOpacity style={s.row} onPress={() => setPwSheetOpen(true)} activeOpacity={0.7}>
+            <View style={{ flex: 1 }}>
+              <Text style={s.rowLabel}>パスワード</Text>
+              <Text style={s.rowValue}>••••••••</Text>
+            </View>
+            <Text style={s.editHint}>変更</Text>
+          </TouchableOpacity>
         </View>
 
         {/* Danger zone */}
@@ -166,6 +284,61 @@ export default function AccountScreen({ navigation }: Props) {
           <Text style={s.footerText}>DIGITAL BOOKMARK · v 1.0.0</Text>
         </View>
       </ScrollView>
+
+      {/* Password change sheet */}
+      <Modal visible={pwSheetOpen} transparent animationType="slide">
+        <TouchableOpacity style={ds.overlay} activeOpacity={1} onPress={() => { if (!savingPassword) { setPwSheetOpen(false); setCurrentPassword(''); setNewPassword(''); setConfirmPassword(''); } }} />
+        <View style={ds.sheet}>
+          <View style={ds.handle} />
+          <Text style={ds.heading}>パスワードを変更</Text>
+          <Text style={ds.confirmLabel}>現在のパスワード</Text>
+          <TextInput
+            style={ds.input}
+            value={currentPassword}
+            onChangeText={setCurrentPassword}
+            placeholder="現在のパスワード"
+            placeholderTextColor="rgba(255,255,255,0.2)"
+            secureTextEntry
+            autoCapitalize="none"
+            autoCorrect={false}
+          />
+          <Text style={[ds.confirmLabel, { marginTop: 4 }]}>新しいパスワード（6文字以上）</Text>
+          <TextInput
+            style={ds.input}
+            value={newPassword}
+            onChangeText={setNewPassword}
+            placeholder="新しいパスワード"
+            placeholderTextColor="rgba(255,255,255,0.2)"
+            secureTextEntry
+            autoCapitalize="none"
+            autoCorrect={false}
+          />
+          <Text style={[ds.confirmLabel, { marginTop: 4 }]}>確認用パスワード</Text>
+          <TextInput
+            style={ds.input}
+            value={confirmPassword}
+            onChangeText={setConfirmPassword}
+            placeholder="もう一度入力"
+            placeholderTextColor="rgba(255,255,255,0.2)"
+            secureTextEntry
+            autoCapitalize="none"
+            autoCorrect={false}
+          />
+          <TouchableOpacity
+            style={[ds.deleteBtn, { backgroundColor: '#4A7C59' }, (!currentPassword || newPassword.length < 6 || confirmPassword.length < 6 || savingPassword) && { opacity: 0.4 }]}
+            onPress={handleChangePassword}
+            disabled={!currentPassword || newPassword.length < 6 || confirmPassword.length < 6 || savingPassword}
+            activeOpacity={0.8}
+          >
+            {savingPassword
+              ? <ActivityIndicator color="#fff" />
+              : <Text style={ds.deleteBtnText}>変更する</Text>}
+          </TouchableOpacity>
+          <TouchableOpacity style={ds.cancelBtn} onPress={() => { setPwSheetOpen(false); setCurrentPassword(''); setNewPassword(''); setConfirmPassword(''); }} disabled={savingPassword} activeOpacity={0.7}>
+            <Text style={ds.cancelBtnText}>キャンセル</Text>
+          </TouchableOpacity>
+        </View>
+      </Modal>
 
       {/* Delete account sheet */}
       <Modal visible={deleteSheetOpen} transparent animationType="slide">
@@ -213,13 +386,21 @@ const s = StyleSheet.create({
   topBarTitle: { fontFamily: F.zen, fontSize: 10, letterSpacing: 2.8, color: W55 },
   scroll: { paddingBottom: 48 },
   heroSection: { alignItems: 'center', paddingVertical: 32, paddingHorizontal: 28 },
+  avatarWrap: { marginBottom: 14 },
   avatar: {
     width: 96, height: 96, borderRadius: 48,
     alignItems: 'center', justifyContent: 'center',
-    marginBottom: 14,
+    overflow: 'hidden',
     shadowColor: '#000', shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.3, shadowRadius: 16, elevation: 8,
   },
+  avatarImg: { width: '100%', height: '100%', borderRadius: 48 },
   avatarText: { fontFamily: F.cormorantLight, fontSize: 40, color: W92, letterSpacing: 1 },
+  avatarOverlay: {
+    position: 'absolute', bottom: 0, left: 0, right: 0,
+    height: 32, borderBottomLeftRadius: 48, borderBottomRightRadius: 48,
+    backgroundColor: 'rgba(0,0,0,0.45)',
+    alignItems: 'center', justifyContent: 'center',
+  },
   heroName: { fontFamily: F.shippori, fontSize: 22, color: W92, marginBottom: 6, letterSpacing: 0.3 },
   heroEmail: { fontFamily: F.cormorant, fontSize: 13, color: W55, letterSpacing: 0.3 },
   sectionLabel: {

@@ -1,9 +1,10 @@
 import React, { useState, useRef } from 'react';
 import {
   View, Text, TextInput, TouchableOpacity, StyleSheet,
-  FlatList, Image, ActivityIndicator, KeyboardAvoidingView,
-  Platform, ScrollView,
+  Image, ActivityIndicator, KeyboardAvoidingView,
+  Platform, ScrollView, Alert,
 } from 'react-native';
+import * as ImagePicker from 'expo-image-picker';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useNavigation } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
@@ -11,6 +12,7 @@ import Svg, { Circle, Path } from 'react-native-svg';
 import { supabase } from '../lib/supabase';
 import { useAuth } from '../contexts/AuthContext';
 import { C, F } from '../lib/colors';
+import { DialInput } from '../components/DialInput';
 import { searchGoogleBooks } from '../lib/google-books';
 import type { GoogleBook } from '../types';
 import type { RootStackParamList } from '../types/navigation';
@@ -222,22 +224,61 @@ function ManualAddForm({
 }: { userId: string; onSuccess: (id: string) => void; onCancel: () => void }) {
   const [title, setTitle] = useState('');
   const [author, setAuthor] = useState('');
-  const [totalPages, setTotalPages] = useState('');
+  const [totalPages, setTotalPages] = useState(0);
+  const [coverUri, setCoverUri] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  async function pickCover() {
+    const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
+    if (status !== 'granted') {
+      Alert.alert('権限が必要です', 'フォトライブラリへのアクセスを許可してください。');
+      return;
+    }
+    const result = await ImagePicker.launchImageLibraryAsync({
+      mediaTypes: ['images'],
+      allowsEditing: true,
+      aspect: [2, 3],
+      quality: 0.8,
+    });
+    if (!result.canceled && result.assets[0]) {
+      setCoverUri(result.assets[0].uri);
+    }
+  }
+
+  async function uploadCover(): Promise<string | null> {
+    if (!coverUri) return null;
+    try {
+      const ext = coverUri.split('.').pop()?.toLowerCase() ?? 'jpg';
+      const mimeType = ext === 'png' ? 'image/png' : 'image/jpeg';
+      const path = `${userId}/${Date.now()}.${ext}`;
+      const response = await fetch(coverUri);
+      const blob = await response.blob();
+      const { data, error: uploadErr } = await supabase.storage
+        .from('covers')
+        .upload(path, blob, { contentType: mimeType });
+      if (uploadErr || !data) return null;
+      const { data: urlData } = supabase.storage.from('covers').getPublicUrl(data.path);
+      return urlData.publicUrl;
+    } catch {
+      return null;
+    }
+  }
 
   async function handleSubmit() {
     if (!title.trim()) { setError('タイトルを入力してください'); return; }
     if (!author.trim()) { setError('著者を入力してください'); return; }
     setLoading(true);
     setError(null);
+    const coverUrl = await uploadCover();
     const { data, error: err } = await supabase
       .from('books')
       .insert({
         user_id: userId,
         title: title.trim(),
         author: author.trim(),
-        total_pages: parseInt(totalPages, 10) || 0,
+        total_pages: totalPages,
+        cover_url: coverUrl,
         status: 'to_read',
         current_page: 0,
         read_count: 0,
@@ -258,6 +299,27 @@ function ManualAddForm({
         </TouchableOpacity>
       </View>
       {error && <Text style={ms.error}>{error}</Text>}
+
+      {/* Cover picker */}
+      <TouchableOpacity style={ms.coverPicker} onPress={pickCover} activeOpacity={0.8}>
+        {coverUri ? (
+          <Image source={{ uri: coverUri }} style={ms.coverImage} resizeMode="cover" />
+        ) : (
+          <View style={ms.coverPlaceholder}>
+            <Svg width="24" height="24" viewBox="0 0 24 24" fill="none">
+              <Path
+                d="M21 15V5a2 2 0 00-2-2H5a2 2 0 00-2 2v14a2 2 0 002 2h10"
+                stroke={C.muted2} strokeWidth="1.3" strokeLinecap="round"
+              />
+              <Path d="M16 19h6M19 16v6" stroke={C.muted2} strokeWidth="1.3" strokeLinecap="round" />
+              <Circle cx="8.5" cy="8.5" r="1.5" fill={C.muted2} />
+              <Path d="M21 15l-5-5L5 21" stroke={C.muted2} strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round" />
+            </Svg>
+            <Text style={ms.coverPlaceholderText}>表紙を追加</Text>
+          </View>
+        )}
+      </TouchableOpacity>
+
       <View style={ms.field}>
         <Text style={ms.fieldLabel}>タイトル *</Text>
         <TextInput style={ms.input} value={title} onChangeText={setTitle} placeholder="本のタイトル" placeholderTextColor={C.muted2} />
@@ -268,7 +330,18 @@ function ManualAddForm({
       </View>
       <View style={ms.field}>
         <Text style={ms.fieldLabel}>総ページ数</Text>
-        <TextInput style={ms.input} value={totalPages} onChangeText={setTotalPages} keyboardType="number-pad" placeholder="300" placeholderTextColor={C.muted2} />
+        <View style={{ borderBottomWidth: 1, borderBottomColor: C.line, paddingBottom: 4 }}>
+          <DialInput
+            value={totalPages}
+            onChange={setTotalPages}
+            min={0}
+            max={9999}
+            color={C.ink}
+            fontSize={18}
+            fontFamily={F.cormorant}
+            slotHeight={36}
+          />
+        </View>
       </View>
       <TouchableOpacity style={[ms.btn, loading && { opacity: 0.5 }]} onPress={handleSubmit} disabled={loading} activeOpacity={0.8}>
         {loading ? <ActivityIndicator color={C.paper} /> : <Text style={ms.btnText}>登録する</Text>}
@@ -336,7 +409,17 @@ const s = StyleSheet.create({
 
 const ms = StyleSheet.create({
   container: { marginTop: 16 },
-  header: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 },
+  header: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20 },
+  coverPicker: {
+    alignSelf: 'center', width: 80, height: 120, borderRadius: 2,
+    overflow: 'hidden', marginBottom: 24,
+  },
+  coverImage: { width: '100%', height: '100%' },
+  coverPlaceholder: {
+    flex: 1, borderWidth: 1, borderColor: C.line, borderStyle: 'dashed', borderRadius: 2,
+    alignItems: 'center', justifyContent: 'center', gap: 8,
+  },
+  coverPlaceholderText: { fontFamily: F.zen, fontSize: 9, letterSpacing: 1, color: C.muted2 },
   label: { fontFamily: F.zen, fontSize: 10, letterSpacing: 2.5, color: C.muted, textTransform: 'uppercase' },
   cancel: { fontFamily: F.zen, fontSize: 11, color: C.muted2 },
   error: { fontFamily: F.zen, fontSize: 12, color: '#7C2B28', marginBottom: 12 },
