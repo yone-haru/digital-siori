@@ -65,10 +65,20 @@ CREATE TABLE IF NOT EXISTS public.book_tags (
   PRIMARY KEY (book_id, tag_id)
 );
 
--- ④ session_memos
+-- ④ session_memos (旧: 互換のため残す)
 CREATE TABLE IF NOT EXISTS public.session_memos (
   id          uuid PRIMARY KEY DEFAULT gen_random_uuid(),
   session_id  uuid NOT NULL REFERENCES public.reading_sessions(id) ON DELETE CASCADE,
+  book_id     uuid NOT NULL REFERENCES public.books(id) ON DELETE CASCADE,
+  user_id     uuid NOT NULL REFERENCES auth.users(id) ON DELETE CASCADE,
+  page_number integer NOT NULL DEFAULT 0,
+  content     text NOT NULL,
+  created_at  timestamptz NOT NULL DEFAULT now()
+);
+
+-- ⑤ book_memos (本ごとの共有メモ)
+CREATE TABLE IF NOT EXISTS public.book_memos (
+  id          uuid PRIMARY KEY DEFAULT gen_random_uuid(),
   book_id     uuid NOT NULL REFERENCES public.books(id) ON DELETE CASCADE,
   user_id     uuid NOT NULL REFERENCES auth.users(id) ON DELETE CASCADE,
   page_number integer NOT NULL DEFAULT 0,
@@ -84,6 +94,7 @@ ALTER TABLE public.reading_sessions ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.tags             ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.book_tags        ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.session_memos    ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.book_memos       ENABLE ROW LEVEL SECURITY;
 
 -- 古いポリシーを全削除
 DROP POLICY IF EXISTS "books: all"          ON public.books;
@@ -91,6 +102,7 @@ DROP POLICY IF EXISTS "sessions: all"       ON public.reading_sessions;
 DROP POLICY IF EXISTS "tags: all"           ON public.tags;
 DROP POLICY IF EXISTS "book_tags: all"      ON public.book_tags;
 DROP POLICY IF EXISTS "session_memos: all"  ON public.session_memos;
+DROP POLICY IF EXISTS "book_memos: all"     ON public.book_memos;
 
 DROP POLICY IF EXISTS "books: 自分のレコードのみ参照可能"    ON public.books;
 DROP POLICY IF EXISTS "books: 自分のレコードのみ挿入可能"    ON public.books;
@@ -122,6 +134,9 @@ CREATE POLICY "book_tags: all" ON public.book_tags FOR ALL
 CREATE POLICY "session_memos: all" ON public.session_memos FOR ALL
   USING (auth.uid() = user_id) WITH CHECK (auth.uid() = user_id);
 
+CREATE POLICY "book_memos: all" ON public.book_memos FOR ALL
+  USING (auth.uid() = user_id) WITH CHECK (auth.uid() = user_id);
+
 -- ================================================================
 -- インデックス
 -- ================================================================
@@ -136,6 +151,8 @@ CREATE INDEX IF NOT EXISTS book_tags_tag_id_idx     ON public.book_tags(tag_id);
 CREATE INDEX IF NOT EXISTS session_memos_session_id ON public.session_memos(session_id);
 CREATE INDEX IF NOT EXISTS session_memos_book_id    ON public.session_memos(book_id);
 CREATE INDEX IF NOT EXISTS session_memos_user_id    ON public.session_memos(user_id);
+CREATE INDEX IF NOT EXISTS book_memos_book_id       ON public.book_memos(book_id);
+CREATE INDEX IF NOT EXISTS book_memos_user_id       ON public.book_memos(user_id);
 
 -- ================================================================
 -- Storage バケット / ポリシー

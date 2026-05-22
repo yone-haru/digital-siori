@@ -9,16 +9,9 @@ import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import Svg, { Path, Circle } from 'react-native-svg';
 import { supabase } from '../lib/supabase';
 import { useAuth } from '../contexts/AuthContext';
-import { F } from '../lib/colors';
+import { C, F } from '../lib/colors';
 import type { RootStackParamList } from '../types/navigation';
 
-const BG = '#0F0D0A';
-const CARD = '#16140F';
-const LINE = 'rgba(255,255,255,0.08)';
-const W92 = 'rgba(255,255,255,0.92)';
-const W55 = 'rgba(255,255,255,0.55)';
-const W35 = 'rgba(255,255,255,0.35)';
-const W25 = 'rgba(255,255,255,0.25)';
 const DANGER = '#C77B6F';
 
 const AVATAR_COLORS = ['#2B3A2E', '#7C2B28', '#1B2A3A', '#3D2B1A', '#2A2A2A', '#4A3728', '#5C2E2E', '#8B7355'];
@@ -44,6 +37,7 @@ export default function AccountScreen({ navigation }: Props) {
   const [uploadingAvatar, setUploadingAvatar] = useState(false);
   const [editingName, setEditingName] = useState(false);
   const [savingName, setSavingName] = useState(false);
+  const [logoutSheetOpen, setLogoutSheetOpen] = useState(false);
   const [deleteSheetOpen, setDeleteSheetOpen] = useState(false);
   const [deleteConfirmText, setDeleteConfirmText] = useState('');
   const [deleting, setDeleting] = useState(false);
@@ -150,13 +144,6 @@ export default function AccountScreen({ navigation }: Props) {
     }
   }
 
-  function confirmLogout() {
-    Alert.alert('ログアウト', 'ログアウトしますか？', [
-      { text: 'キャンセル', style: 'cancel' },
-      { text: 'ログアウト', style: 'destructive', onPress: signOut },
-    ]);
-  }
-
   async function handleDeleteAccount() {
     if (!user) return;
     setDeleting(true);
@@ -171,7 +158,7 @@ export default function AccountScreen({ navigation }: Props) {
       <View style={s.topBar}>
         <TouchableOpacity onPress={() => navigation.goBack()} hitSlop={8}>
           <Svg width="22" height="22" viewBox="0 0 22 22" fill="none">
-            <Path d="M14 4L6 11l8 7" stroke={W55} strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round" />
+            <Path d="M14 4L6 11l8 7" stroke={C.ink} strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round" />
           </Svg>
         </TouchableOpacity>
         <Text style={s.topBarTitle}>ACCOUNT</Text>
@@ -190,13 +177,13 @@ export default function AccountScreen({ navigation }: Props) {
             {uploadingAvatar
               ? (
                 <View style={s.avatarOverlay}>
-                  <ActivityIndicator color={W92} size="small" />
+                  <ActivityIndicator color="rgba(255,255,255,0.9)" size="small" />
                 </View>
               ) : (
                 <View style={s.avatarOverlay}>
                   <Svg width="20" height="20" viewBox="0 0 24 24" fill="none">
-                    <Path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z" stroke={W92} strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round" />
-                    <Circle cx="12" cy="13" r="4" stroke={W92} strokeWidth="1.4" />
+                    <Path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z" stroke="rgba(255,255,255,0.9)" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round" />
+                    <Circle cx="12" cy="13" r="4" stroke="rgba(255,255,255,0.9)" strokeWidth="1.4" />
                   </Svg>
                 </View>
               )}
@@ -208,7 +195,6 @@ export default function AccountScreen({ navigation }: Props) {
         {/* Profile section */}
         <Text style={s.sectionLabel}>Profile</Text>
         <View style={s.sectionCard}>
-          {/* Display name row */}
           <View style={s.row}>
             <View style={{ flex: 1 }}>
               <Text style={s.rowLabel}>表示名</Text>
@@ -219,7 +205,7 @@ export default function AccountScreen({ navigation }: Props) {
                   onChangeText={setName}
                   autoFocus
                   placeholder="名前を入力"
-                  placeholderTextColor={W35}
+                  placeholderTextColor={C.muted2}
                   maxLength={20}
                   onBlur={saveName}
                   returnKeyType="done"
@@ -233,7 +219,7 @@ export default function AccountScreen({ navigation }: Props) {
             </View>
             <View style={s.rowRight}>
               {savingName
-                ? <ActivityIndicator size="small" color={W35} />
+                ? <ActivityIndicator size="small" color={C.muted2} />
                 : <Text style={s.editHint}>{editingName ? '' : '編集'}</Text>}
             </View>
           </View>
@@ -260,7 +246,7 @@ export default function AccountScreen({ navigation }: Props) {
 
         {/* Danger zone */}
         <View style={[s.sectionCard, { marginTop: 32 }]}>
-          <TouchableOpacity style={s.row} onPress={confirmLogout} activeOpacity={0.7}>
+          <TouchableOpacity style={s.row} onPress={() => setLogoutSheetOpen(true)} activeOpacity={0.7}>
             <Text style={s.dangerText}>ログアウト</Text>
             <Svg width="16" height="16" viewBox="0 0 16 16" fill="none">
               <Path d="M9 2H3.5A1.5 1.5 0 0 0 2 3.5v9A1.5 1.5 0 0 0 3.5 14H9" stroke={DANGER} strokeWidth="1.3" strokeLinecap="round" />
@@ -285,54 +271,70 @@ export default function AccountScreen({ navigation }: Props) {
         </View>
       </ScrollView>
 
+      {/* Logout confirmation sheet */}
+      <Modal visible={logoutSheetOpen} transparent animationType="slide">
+        <TouchableOpacity style={ds.overlay} activeOpacity={1} onPress={() => setLogoutSheetOpen(false)} />
+        <View style={ds.sheet}>
+          <View style={ds.handle} />
+          <Text style={ds.heading}>ログアウトしますか？</Text>
+          <Text style={ds.body}>ログアウトすると、再度ログインが必要になります。</Text>
+          <TouchableOpacity style={ds.deleteBtn} onPress={() => { setLogoutSheetOpen(false); signOut(); }} activeOpacity={0.8}>
+            <Text style={ds.deleteBtnText}>ログアウト</Text>
+          </TouchableOpacity>
+          <TouchableOpacity style={ds.cancelBtn} onPress={() => setLogoutSheetOpen(false)} activeOpacity={0.7}>
+            <Text style={ds.cancelBtnText}>キャンセル</Text>
+          </TouchableOpacity>
+        </View>
+      </Modal>
+
       {/* Password change sheet */}
       <Modal visible={pwSheetOpen} transparent animationType="slide">
         <TouchableOpacity style={ds.overlay} activeOpacity={1} onPress={() => { if (!savingPassword) { setPwSheetOpen(false); setCurrentPassword(''); setNewPassword(''); setConfirmPassword(''); } }} />
         <View style={ds.sheet}>
           <View style={ds.handle} />
           <Text style={ds.heading}>パスワードを変更</Text>
-          <Text style={ds.confirmLabel}>現在のパスワード</Text>
+          <Text style={ds.fieldLabel}>現在のパスワード</Text>
           <TextInput
             style={ds.input}
             value={currentPassword}
             onChangeText={setCurrentPassword}
             placeholder="現在のパスワード"
-            placeholderTextColor="rgba(255,255,255,0.2)"
+            placeholderTextColor={C.muted2}
             secureTextEntry
             autoCapitalize="none"
             autoCorrect={false}
           />
-          <Text style={[ds.confirmLabel, { marginTop: 4 }]}>新しいパスワード（6文字以上）</Text>
+          <Text style={[ds.fieldLabel, { marginTop: 4 }]}>新しいパスワード（6文字以上）</Text>
           <TextInput
             style={ds.input}
             value={newPassword}
             onChangeText={setNewPassword}
             placeholder="新しいパスワード"
-            placeholderTextColor="rgba(255,255,255,0.2)"
+            placeholderTextColor={C.muted2}
             secureTextEntry
             autoCapitalize="none"
             autoCorrect={false}
           />
-          <Text style={[ds.confirmLabel, { marginTop: 4 }]}>確認用パスワード</Text>
+          <Text style={[ds.fieldLabel, { marginTop: 4 }]}>確認用パスワード</Text>
           <TextInput
             style={ds.input}
             value={confirmPassword}
             onChangeText={setConfirmPassword}
             placeholder="もう一度入力"
-            placeholderTextColor="rgba(255,255,255,0.2)"
+            placeholderTextColor={C.muted2}
             secureTextEntry
             autoCapitalize="none"
             autoCorrect={false}
           />
           <TouchableOpacity
-            style={[ds.deleteBtn, { backgroundColor: '#4A7C59' }, (!currentPassword || newPassword.length < 6 || confirmPassword.length < 6 || savingPassword) && { opacity: 0.4 }]}
+            style={[ds.saveBtn, (!currentPassword || newPassword.length < 6 || confirmPassword.length < 6 || savingPassword) && { opacity: 0.4 }]}
             onPress={handleChangePassword}
             disabled={!currentPassword || newPassword.length < 6 || confirmPassword.length < 6 || savingPassword}
             activeOpacity={0.8}
           >
             {savingPassword
-              ? <ActivityIndicator color="#fff" />
-              : <Text style={ds.deleteBtnText}>変更する</Text>}
+              ? <ActivityIndicator color={C.paper} />
+              : <Text style={ds.saveBtnText}>変更する</Text>}
           </TouchableOpacity>
           <TouchableOpacity style={ds.cancelBtn} onPress={() => { setPwSheetOpen(false); setCurrentPassword(''); setNewPassword(''); setConfirmPassword(''); }} disabled={savingPassword} activeOpacity={0.7}>
             <Text style={ds.cancelBtnText}>キャンセル</Text>
@@ -349,13 +351,13 @@ export default function AccountScreen({ navigation }: Props) {
           <Text style={ds.body}>
             本棚・読書履歴・タグがすべて削除されます。この操作は取り消せません。
           </Text>
-          <Text style={ds.confirmLabel}>確認のため「削除する」と入力してください</Text>
+          <Text style={ds.fieldLabel}>確認のため「削除する」と入力してください</Text>
           <TextInput
             style={ds.input}
             value={deleteConfirmText}
             onChangeText={setDeleteConfirmText}
             placeholder="削除する"
-            placeholderTextColor="rgba(255,255,255,0.2)"
+            placeholderTextColor={C.muted2}
             autoCapitalize="none"
           />
           <TouchableOpacity
@@ -378,12 +380,12 @@ export default function AccountScreen({ navigation }: Props) {
 }
 
 const s = StyleSheet.create({
-  container: { flex: 1, backgroundColor: BG },
+  container: { flex: 1, backgroundColor: C.paper },
   topBar: {
     flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center',
     paddingHorizontal: 28, paddingVertical: 12,
   },
-  topBarTitle: { fontFamily: F.zen, fontSize: 10, letterSpacing: 2.8, color: W55 },
+  topBarTitle: { fontFamily: F.zen, fontSize: 10, letterSpacing: 2.8, color: C.muted, textTransform: 'uppercase' },
   scroll: { paddingBottom: 48 },
   heroSection: { alignItems: 'center', paddingVertical: 32, paddingHorizontal: 28 },
   avatarWrap: { marginBottom: 14 },
@@ -391,65 +393,70 @@ const s = StyleSheet.create({
     width: 96, height: 96, borderRadius: 48,
     alignItems: 'center', justifyContent: 'center',
     overflow: 'hidden',
-    shadowColor: '#000', shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.3, shadowRadius: 16, elevation: 8,
+    shadowColor: '#000', shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.15, shadowRadius: 12, elevation: 6,
   },
   avatarImg: { width: '100%', height: '100%', borderRadius: 48 },
-  avatarText: { fontFamily: F.cormorantLight, fontSize: 40, color: W92, letterSpacing: 1 },
+  avatarText: { fontFamily: F.cormorantLight, fontSize: 40, color: 'rgba(255,255,255,0.9)', letterSpacing: 1 },
   avatarOverlay: {
     position: 'absolute', bottom: 0, left: 0, right: 0,
     height: 32, borderBottomLeftRadius: 48, borderBottomRightRadius: 48,
     backgroundColor: 'rgba(0,0,0,0.45)',
     alignItems: 'center', justifyContent: 'center',
   },
-  heroName: { fontFamily: F.shippori, fontSize: 22, color: W92, marginBottom: 6, letterSpacing: 0.3 },
-  heroEmail: { fontFamily: F.cormorant, fontSize: 13, color: W55, letterSpacing: 0.3 },
+  heroName: { fontFamily: F.shippori, fontSize: 22, color: C.ink, marginBottom: 6, letterSpacing: 0.3 },
+  heroEmail: { fontFamily: F.cormorant, fontSize: 13, color: C.muted, letterSpacing: 0.3 },
   sectionLabel: {
-    fontFamily: F.zen, fontSize: 10, letterSpacing: 2.2, color: W35,
+    fontFamily: F.zen, fontSize: 10, letterSpacing: 2.2, color: C.muted,
     textTransform: 'uppercase', paddingHorizontal: 28, marginBottom: 8,
   },
-  sectionCard: { borderTopWidth: 1, borderBottomWidth: 1, borderColor: LINE },
+  sectionCard: { borderTopWidth: 1, borderBottomWidth: 1, borderColor: C.line },
   row: {
     flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
     paddingHorizontal: 28, paddingVertical: 18, gap: 16,
   },
-  rowDivider: { height: 1, backgroundColor: LINE, marginHorizontal: 28 },
-  rowLabel: { fontFamily: F.zen, fontSize: 11, color: W55, marginBottom: 4, letterSpacing: 0.3 },
-  rowValue: { fontFamily: F.cormorant, fontSize: 18, color: W92 },
+  rowDivider: { height: 1, backgroundColor: C.line, marginHorizontal: 28 },
+  rowLabel: { fontFamily: F.zen, fontSize: 11, color: C.muted, marginBottom: 4, letterSpacing: 0.3 },
+  rowValue: { fontFamily: F.cormorant, fontSize: 18, color: C.ink },
   rowRight: { flexShrink: 0 },
-  editHint: { fontFamily: F.zen, fontSize: 11, color: W35 },
+  editHint: { fontFamily: F.zen, fontSize: 11, color: C.muted2 },
   nameInput: {
-    fontFamily: F.cormorant, fontSize: 18, color: W92,
-    borderBottomWidth: 1, borderBottomColor: 'rgba(255,255,255,0.3)', paddingBottom: 4,
+    fontFamily: F.cormorant, fontSize: 18, color: C.ink,
+    borderBottomWidth: 1, borderBottomColor: C.line, paddingBottom: 4,
   },
   dangerText: { fontFamily: F.zen, fontSize: 14, color: DANGER, letterSpacing: 0.3 },
-  dangerSub: { fontFamily: F.zen, fontSize: 11, color: W35, marginTop: 3, letterSpacing: 0.2 },
+  dangerSub: { fontFamily: F.zen, fontSize: 11, color: C.muted2, marginTop: 3, letterSpacing: 0.2 },
   footer: { alignItems: 'center', paddingTop: 40, paddingBottom: 8 },
-  footerText: { fontFamily: F.cormorant, fontSize: 11, color: W25, letterSpacing: 3 },
+  footerText: { fontFamily: F.cormorant, fontSize: 11, color: C.muted2, letterSpacing: 3 },
 });
 
 const ds = StyleSheet.create({
-  overlay: { ...StyleSheet.absoluteFillObject, backgroundColor: 'rgba(0,0,0,0.6)' },
+  overlay: { ...StyleSheet.absoluteFillObject, backgroundColor: 'rgba(0,0,0,0.5)' },
   sheet: {
     position: 'absolute', bottom: 0, left: 0, right: 0,
-    backgroundColor: CARD, borderTopLeftRadius: 16, borderTopRightRadius: 16,
+    backgroundColor: C.paper, borderTopLeftRadius: 16, borderTopRightRadius: 16,
     padding: 28, paddingBottom: 48,
   },
-  handle: { width: 40, height: 3, backgroundColor: W25, borderRadius: 2, alignSelf: 'center', marginBottom: 24 },
-  heading: { fontFamily: F.shippori, fontSize: 20, color: W92, marginBottom: 10, lineHeight: 30 },
-  body: { fontFamily: F.zen, fontSize: 12, color: W55, lineHeight: 20, marginBottom: 20 },
-  confirmLabel: { fontFamily: F.zen, fontSize: 10, letterSpacing: 2, color: W35, textTransform: 'uppercase', marginBottom: 8 },
+  handle: { width: 40, height: 3, backgroundColor: C.line, borderRadius: 2, alignSelf: 'center', marginBottom: 24 },
+  heading: { fontFamily: F.shippori, fontSize: 20, color: C.ink, marginBottom: 10, lineHeight: 30 },
+  body: { fontFamily: F.zen, fontSize: 12, color: C.muted, lineHeight: 20, marginBottom: 20 },
+  fieldLabel: { fontFamily: F.zen, fontSize: 10, letterSpacing: 2, color: C.muted, textTransform: 'uppercase', marginBottom: 8 },
   input: {
-    fontFamily: F.zen, fontSize: 16, color: W92,
-    borderBottomWidth: 1, borderBottomColor: 'rgba(255,255,255,0.15)', paddingBottom: 8, marginBottom: 20,
+    fontFamily: F.zen, fontSize: 16, color: C.ink,
+    borderBottomWidth: 1, borderBottomColor: C.line, paddingBottom: 8, marginBottom: 20,
   },
+  saveBtn: {
+    height: 50, backgroundColor: C.ink, borderRadius: 2,
+    alignItems: 'center', justifyContent: 'center', marginBottom: 10,
+  },
+  saveBtnText: { fontFamily: F.zen, fontSize: 13, letterSpacing: 1.5, color: C.paper },
   deleteBtn: {
     height: 50, backgroundColor: DANGER, borderRadius: 2,
     alignItems: 'center', justifyContent: 'center', marginBottom: 10,
   },
   deleteBtnText: { fontFamily: F.zen, fontSize: 13, letterSpacing: 1.5, color: '#fff' },
   cancelBtn: {
-    height: 50, borderWidth: 1, borderColor: LINE, borderRadius: 2,
+    height: 50, borderWidth: 1, borderColor: C.line, borderRadius: 2,
     alignItems: 'center', justifyContent: 'center',
   },
-  cancelBtnText: { fontFamily: F.zen, fontSize: 13, letterSpacing: 1.5, color: W55 },
+  cancelBtnText: { fontFamily: F.zen, fontSize: 13, letterSpacing: 1.5, color: C.ink },
 });

@@ -1,7 +1,7 @@
 import React, { useState, useCallback } from 'react';
 import {
   View, Text, ScrollView, TouchableOpacity, StyleSheet,
-  TextInput, Modal, ActivityIndicator,
+  TextInput, Modal, ActivityIndicator, KeyboardAvoidingView, Platform,
 } from 'react-native';
 import { DialInput } from '../components/DialInput';
 import { CalendarPicker } from '../components/CalendarPicker';
@@ -24,7 +24,7 @@ type Props = {
   route: RouteProp<RootStackParamList, 'BookDetail'>;
 };
 
-type MemoEntry = { content: string; pageNumber: number };
+type BookMemo = { id: string; page_number: number; content: string; created_at: string };
 
 const STATUS_LABELS: Record<BookStatus, string> = {
   reading: '読書中', rereading: '再読中', to_read: '未読', finished: '読書完了',
@@ -37,7 +37,13 @@ export default function BookDetailScreen({ navigation, route }: Props) {
   const [sessions, setSessions] = useState<ReadingSession[]>([]);
   const [allTags, setAllTags] = useState<Tag[]>([]);
   const [bookTagIds, setBookTagIds] = useState<string[]>([]);
-  const [memos, setMemos] = useState<Record<string, MemoEntry[]>>({});
+  const [memos, setMemos] = useState<BookMemo[]>([]);
+  const [memoAddOpen, setMemoAddOpen] = useState(false);
+  const [memoAddPage, setMemoAddPage] = useState(0);
+  const [memoAddText, setMemoAddText] = useState('');
+  const [savingMemo, setSavingMemo] = useState(false);
+  const [editingMemoId, setEditingMemoId] = useState<string | null>(null);
+  const [deletingMemo, setDeletingMemo] = useState<BookMemo | null>(null);
   const [loading, setLoading] = useState(true);
   const [deleteSheetOpen, setDeleteSheetOpen] = useState(false);
   const [finishSheetOpen, setFinishSheetOpen] = useState(false);
@@ -74,18 +80,12 @@ export default function BookDetailScreen({ navigation, route }: Props) {
     setBookTagIds((btRows ?? []).map((r: { tag_id: string }) => r.tag_id));
     setAllTags((tagRows as Tag[]) ?? []);
 
-    if (sessionList.length > 0) {
-      const ids = sessionList.map((r) => r.id);
-      const { data: memoRows } = await supabase
-        .from('session_memos')
-        .select('session_id,content,page_number')
-        .in('session_id', ids);
-      const memoMap: Record<string, MemoEntry[]> = {};
-      for (const m of memoRows ?? []) {
-        memoMap[m.session_id] = [...(memoMap[m.session_id] ?? []), { content: m.content, pageNumber: m.page_number }];
-      }
-      setMemos(memoMap);
-    }
+    const { data: memoRows } = await supabase
+      .from('book_memos')
+      .select('id,page_number,content,created_at')
+      .eq('book_id', bookId)
+      .order('created_at', { ascending: true });
+    setMemos((memoRows as BookMemo[]) ?? []);
   }, [bookId, user]);
 
   useFocusEffect(useCallback(() => { fetchData().finally(() => setLoading(false)); }, [fetchData]));
@@ -161,6 +161,44 @@ export default function BookDetailScreen({ navigation, route }: Props) {
     }
     setNewTagName('');
     setCreatingTag(false);
+  }
+
+  async function addMemo() {
+    if (!memoAddText.trim() || !user) return;
+    setSavingMemo(true);
+    if (editingMemoId) {
+      await supabase.from('book_memos')
+        .update({ page_number: memoAddPage, content: memoAddText.trim() })
+        .eq('id', editingMemoId);
+      setMemos((prev) => prev.map((m) =>
+        m.id === editingMemoId ? { ...m, page_number: memoAddPage, content: memoAddText.trim() } : m
+      ));
+      setEditingMemoId(null);
+    } else {
+      const { data } = await supabase
+        .from('book_memos')
+        .insert({ book_id: bookId, user_id: user.id, page_number: memoAddPage, content: memoAddText.trim() })
+        .select('id,page_number,content,created_at')
+        .single();
+      if (data) setMemos((prev) => [...prev, data as BookMemo]);
+    }
+    setMemoAddText('');
+    setSavingMemo(false);
+    setMemoAddOpen(false);
+  }
+
+  function openEditMemo(memo: BookMemo) {
+    setEditingMemoId(memo.id);
+    setMemoAddPage(memo.page_number);
+    setMemoAddText(memo.content);
+    setMemoAddOpen(true);
+  }
+
+  async function confirmDeleteMemo() {
+    if (!deletingMemo) return;
+    setMemos((prev) => prev.filter((m) => m.id !== deletingMemo.id));
+    await supabase.from('book_memos').delete().eq('id', deletingMemo.id);
+    setDeletingMemo(null);
   }
 
   async function handleStartReading() {
@@ -435,6 +473,39 @@ export default function BookDetailScreen({ navigation, route }: Props) {
           )}
         </View>
 
+        {/* Memos */}
+        <View style={s.section}>
+          <View style={s.sectionHeadRow}>
+            <Text style={s.sectionLabel}>Memos</Text>
+            <TouchableOpacity onPress={() => { setMemoAddPage(book.current_page); setMemoAddOpen(true); }} hitSlop={8}>
+              <Text style={s.addSessionText}>+ 追加</Text>
+            </TouchableOpacity>
+          </View>
+          {memos.length === 0 ? (
+            <Text style={s.noSessions}>メモなし</Text>
+          ) : (
+            memos.map((memo) => (
+              <View key={memo.id} style={s.memoItem}>
+                <Text style={s.memoPage}>p.{memo.page_number}</Text>
+                <Text style={s.memoContent}>{memo.content}</Text>
+                <View style={s.memoActions}>
+                  <TouchableOpacity onPress={() => openEditMemo(memo)} hitSlop={8}>
+                    <Svg width="14" height="14" viewBox="0 0 24 24" fill="none">
+                      <Path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7" stroke={C.muted2} strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
+                      <Path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z" stroke={C.muted2} strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
+                    </Svg>
+                  </TouchableOpacity>
+                  <TouchableOpacity onPress={() => setDeletingMemo(memo)} hitSlop={8}>
+                    <Svg width="14" height="14" viewBox="0 0 14 14" fill="none">
+                      <Path d="M2 2l10 10M12 2L2 12" stroke={C.muted2} strokeWidth="1.3" strokeLinecap="round" />
+                    </Svg>
+                  </TouchableOpacity>
+                </View>
+              </View>
+            ))
+          )}
+        </View>
+
         {/* Session history */}
         <View style={s.section}>
           <View style={s.sectionHeadRow}>
@@ -448,7 +519,6 @@ export default function BookDetailScreen({ navigation, route }: Props) {
           ) : (
             sessions.map((session) => {
               const pagesRead = (session.end_page ?? 0) - (session.start_page ?? 0);
-              const sessionMemos = memos[session.id] ?? [];
               return (
                 <View key={session.id} style={s.sessionItem}>
                   <View style={s.sessionTop}>
@@ -461,16 +531,6 @@ export default function BookDetailScreen({ navigation, route }: Props) {
                     </View>
                     <Text style={s.sessionDuration}>{formatDuration(session.duration_seconds)}</Text>
                   </View>
-                  {sessionMemos.length > 0 && (
-                    <View style={s.memoList}>
-                      {sessionMemos.map((memo, i) => (
-                        <View key={i} style={s.memoRow}>
-                          <Text style={s.memoPage}>p.{memo.pageNumber}</Text>
-                          <Text style={s.memoText}>{memo.content}</Text>
-                        </View>
-                      ))}
-                    </View>
-                  )}
                 </View>
               );
             })
@@ -597,6 +657,58 @@ export default function BookDetailScreen({ navigation, route }: Props) {
         </View>
       </Modal>
 
+      {/* Memo add sheet */}
+      <Modal visible={memoAddOpen} transparent animationType="slide">
+        <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : 'height'} style={{ flex: 1 }}>
+          <TouchableOpacity style={s.overlay} activeOpacity={1} onPress={() => { setMemoAddOpen(false); setEditingMemoId(null); setMemoAddText(''); }} />
+          <View style={s.sheet}>
+            <View style={s.sheetHandle} />
+            <Text style={s.sheetHeadingSmall}>{editingMemoId ? 'メモを編集' : 'メモを追加'}</Text>
+            <View style={s.manualRow}>
+              <View style={{ flex: 1 }}>
+                <Text style={s.manualLabel}>PAGE</Text>
+                <View style={s.manualPageRow}>
+                  <Text style={s.manualPageUnit}>p.</Text>
+                  <DialInput
+                    value={memoAddPage}
+                    onChange={setMemoAddPage}
+                    min={0}
+                    max={book.total_pages > 0 ? book.total_pages : 9999}
+                    color={C.ink}
+                    fontSize={22}
+                    fontFamily={F.cormorant}
+                    slotHeight={36}
+                  />
+                </View>
+              </View>
+            </View>
+            <Text style={[s.manualLabel, { marginBottom: 8 }]}>NOTE</Text>
+            <TextInput
+              style={[s.newTagInput, { minHeight: 80, textAlignVertical: 'top', marginBottom: 20 }]}
+              value={memoAddText}
+              onChangeText={setMemoAddText}
+              placeholder="メモを入力..."
+              placeholderTextColor={C.muted2}
+              multiline
+              autoFocus
+            />
+            <TouchableOpacity
+              style={[s.saveBtn, (savingMemo || !memoAddText.trim()) && { opacity: 0.4 }]}
+              onPress={addMemo}
+              disabled={savingMemo || !memoAddText.trim()}
+              activeOpacity={0.8}
+            >
+              {savingMemo
+                ? <ActivityIndicator color={C.paper} />
+                : <Text style={s.saveBtnText}>{editingMemoId ? '更新' : '保存'}</Text>}
+            </TouchableOpacity>
+            <TouchableOpacity style={s.cancelBtn} onPress={() => { setMemoAddOpen(false); setEditingMemoId(null); setMemoAddText(''); }} activeOpacity={0.8}>
+              <Text style={s.cancelBtnText}>キャンセル</Text>
+            </TouchableOpacity>
+          </View>
+        </KeyboardAvoidingView>
+      </Modal>
+
       {/* Tag sheet */}
       <Modal visible={tagSheetOpen} transparent animationType="slide">
         <TouchableOpacity style={s.overlay} activeOpacity={1} onPress={() => setTagSheetOpen(false)} />
@@ -638,6 +750,27 @@ export default function BookDetailScreen({ navigation, route }: Props) {
                 : <Text style={s.newTagBtnText}>作成</Text>}
             </TouchableOpacity>
           </View>
+        </View>
+      </Modal>
+
+      {/* Memo delete confirmation sheet */}
+      <Modal visible={!!deletingMemo} transparent animationType="slide">
+        <TouchableOpacity style={s.overlay} activeOpacity={1} onPress={() => setDeletingMemo(null)} />
+        <View style={s.sheet}>
+          <View style={s.sheetHandle} />
+          <Text style={s.sheetHeading}>メモを削除しますか？</Text>
+          {deletingMemo && (
+            <View style={s.memoDeletePreview}>
+              <Text style={s.memoPage}>p.{deletingMemo.page_number}</Text>
+              <Text style={s.memoContent} numberOfLines={3}>{deletingMemo.content}</Text>
+            </View>
+          )}
+          <TouchableOpacity style={s.deleteBtn} onPress={confirmDeleteMemo} activeOpacity={0.8}>
+            <Text style={s.deleteBtnText}>削除する</Text>
+          </TouchableOpacity>
+          <TouchableOpacity style={s.cancelBtn} onPress={() => setDeletingMemo(null)} activeOpacity={0.8}>
+            <Text style={s.cancelBtnText}>キャンセル</Text>
+          </TouchableOpacity>
         </View>
       </Modal>
 
@@ -892,10 +1025,17 @@ const s = StyleSheet.create({
   sessionDate: { fontFamily: F.shippori, fontSize: 13, color: C.ink2, marginBottom: 2 },
   sessionPages: { fontFamily: F.zen, fontSize: 11, color: C.muted2 },
   sessionDuration: { fontFamily: F.cormorant, fontSize: 15, color: C.muted },
-  memoList: { marginTop: 8, gap: 4 },
-  memoRow: { flexDirection: 'row', gap: 8, paddingLeft: 4 },
-  memoPage: { fontFamily: F.cormorant, fontSize: 12, color: C.muted2, flexShrink: 0 },
-  memoText: { fontFamily: F.zen, fontSize: 12, color: C.muted2, lineHeight: 18, flex: 1 },
+  memoItem: {
+    flexDirection: 'row', alignItems: 'flex-start', gap: 10,
+    borderTopWidth: 1, borderTopColor: C.line, paddingVertical: 12,
+  },
+  memoPage: { fontFamily: F.cormorant, fontSize: 13, color: C.muted2, flexShrink: 0, paddingTop: 1 },
+  memoContent: { fontFamily: F.zen, fontSize: 13, color: C.ink2, lineHeight: 20, flex: 1 },
+  memoActions: { flexDirection: 'row', gap: 12, paddingTop: 2 },
+  memoDeletePreview: {
+    flexDirection: 'row', gap: 10, alignItems: 'flex-start',
+    backgroundColor: C.bg, borderRadius: 4, padding: 14, marginBottom: 20,
+  },
   overlay: { ...StyleSheet.absoluteFillObject, backgroundColor: 'rgba(0,0,0,0.5)' },
   sheet: {
     position: 'absolute', bottom: 0, left: 0, right: 0,
