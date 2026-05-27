@@ -10,6 +10,7 @@ export type RootStackParamList = {
     totalPages: number;
   };
   Account: undefined;
+  ResetPassword: undefined;
 };
 
 export type AuthStackParamList = {

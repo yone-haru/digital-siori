@@ -11,6 +11,7 @@ import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import Svg, { Circle, Path } from 'react-native-svg';
 import { supabase } from '../lib/supabase';
 import { useAuth } from '../contexts/AuthContext';
+import { useSubscription } from '../contexts/SubscriptionContext';
 import { C, F } from '../lib/colors';
 import { DialInput } from '../components/DialInput';
 import { searchGoogleBooks } from '../lib/google-books';
@@ -23,13 +24,21 @@ type SearchState = 'idle' | 'loading' | 'done' | 'error';
 export default function AddBookScreen() {
   const nav = useNavigation<Nav>();
   const { user } = useAuth();
+  const { isPro, openPaywall } = useSubscription();
   const [query, setQuery] = useState('');
   const [results, setResults] = useState<GoogleBook[]>([]);
   const [searchState, setSearchState] = useState<SearchState>('idle');
   const [addingId, setAddingId] = useState<string | null>(null);
   const [addError, setAddError] = useState<string | null>(null);
   const [showManual, setShowManual] = useState(false);
+  const [bookCount, setBookCount] = useState(0);
   const inputRef = useRef<TextInput>(null);
+
+  React.useEffect(() => {
+    if (!user) return;
+    supabase.from('books').select('id', { count: 'exact', head: true })
+      .then(({ count }) => setBookCount(count ?? 0));
+  }, [user]);
 
   async function handleSearch() {
     if (!query.trim()) return;
@@ -48,6 +57,7 @@ export default function AddBookScreen() {
 
   async function handleAdd(book: GoogleBook) {
     if (!user) return;
+    if (!isPro && bookCount >= 20) { openPaywall(); return; }
     setAddError(null);
     setAddingId(book.googleId);
     const { data, error } = await supabase
@@ -211,6 +221,8 @@ export default function AddBookScreen() {
               userId={user?.id ?? ''}
               onSuccess={(id) => nav.navigate('BookDetail', { bookId: id })}
               onCancel={() => setShowManual(false)}
+              canAdd={isPro || bookCount < 20}
+              onPaywall={openPaywall}
             />
           )}
         </ScrollView>
@@ -220,8 +232,8 @@ export default function AddBookScreen() {
 }
 
 function ManualAddForm({
-  userId, onSuccess, onCancel,
-}: { userId: string; onSuccess: (id: string) => void; onCancel: () => void }) {
+  userId, onSuccess, onCancel, canAdd, onPaywall,
+}: { userId: string; onSuccess: (id: string) => void; onCancel: () => void; canAdd: boolean; onPaywall: () => void }) {
   const [title, setTitle] = useState('');
   const [author, setAuthor] = useState('');
   const [totalPages, setTotalPages] = useState(0);
@@ -268,6 +280,7 @@ function ManualAddForm({
   async function handleSubmit() {
     if (!title.trim()) { setError('タイトルを入力してください'); return; }
     if (!author.trim()) { setError('著者を入力してください'); return; }
+    if (!canAdd) { onPaywall(); return; }
     setLoading(true);
     setError(null);
     const coverUrl = await uploadCover();

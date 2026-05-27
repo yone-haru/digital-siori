@@ -20,10 +20,11 @@ type Book = {
   id: string; title: string; author: string; cover_url: string | null;
   current_page: number; total_pages: number; status: BookStatus;
   created_at: string; updated_at: string; tagIds: string[];
+  rating: number | null;
 };
 type Tag = { id: string; name: string };
 type FilterTab = 'all' | BookStatus;
-type SortKey = 'updated_at' | 'created_at' | 'title';
+type SortKey = 'updated_at' | 'created_at' | 'title' | 'rating';
 
 const FILTERS: { key: FilterTab; label: string }[] = [
   { key: 'all', label: 'すべて' },
@@ -37,6 +38,7 @@ const SORTS: { key: SortKey; label: string }[] = [
   { key: 'updated_at', label: '更新日順' },
   { key: 'created_at', label: '登録日順' },
   { key: 'title', label: 'タイトル順' },
+  { key: 'rating', label: '評価順' },
 ];
 
 const SECTIONS: { status: BookStatus; label: string }[] = [
@@ -69,7 +71,7 @@ export default function ShelfScreen() {
     if (!user) return;
     const [{ data: bData }, { data: btRows }, { data: tagRows }] = await Promise.all([
       supabase.from('books')
-        .select('id,title,author,cover_url,current_page,total_pages,status,created_at,updated_at')
+        .select('id,title,author,cover_url,current_page,total_pages,status,created_at,updated_at,rating')
         .order('updated_at', { ascending: false }),
       supabase.from('book_tags').select('book_id,tag_id'),
       supabase.from('tags').select('id,name').eq('user_id', user.id).order('created_at'),
@@ -110,6 +112,11 @@ export default function ShelfScreen() {
     if (tagFilter) base = base.filter((b) => b.tagIds.includes(tagFilter));
     return [...base].sort((a, b) => {
       if (sortKey === 'title') return a.title.localeCompare(b.title, 'ja');
+      if (sortKey === 'rating') {
+        const ra = a.rating ?? 0;
+        const rb = b.rating ?? 0;
+        return rb !== ra ? rb - ra : new Date(b.updated_at).getTime() - new Date(a.updated_at).getTime();
+      }
       return new Date(b[sortKey]).getTime() - new Date(a[sortKey]).getTime();
     });
   }, [visibleBooks, filter, sortKey, tagFilter]);

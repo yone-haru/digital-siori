@@ -1,7 +1,7 @@
 import React, { useState, useCallback } from 'react';
 import {
   View, Text, ScrollView, TouchableOpacity, StyleSheet,
-  TextInput, Modal, ActivityIndicator, KeyboardAvoidingView, Platform,
+  TextInput, ActivityIndicator,
 } from 'react-native';
 import { DialInput } from '../components/DialInput';
 import { CalendarPicker } from '../components/CalendarPicker';
@@ -12,9 +12,11 @@ import type { RouteProp } from '@react-navigation/native';
 import Svg, { Path, Circle } from 'react-native-svg';
 import { supabase } from '../lib/supabase';
 import { useAuth } from '../contexts/AuthContext';
+import { useSubscription } from '../contexts/SubscriptionContext';
 import { C, F } from '../lib/colors';
 import { formatDuration, formatSessionDate } from '../lib/utils';
 import { pendingDelete } from '../lib/pendingDelete';
+import { BottomSheet } from '../components/BottomSheet';
 import { BookCover } from '../components/BookCover';
 import type { Book, ReadingSession, Tag, BookStatus } from '../types';
 import type { RootStackParamList } from '../types/navigation';
@@ -33,6 +35,7 @@ const STATUS_LABELS: Record<BookStatus, string> = {
 export default function BookDetailScreen({ navigation, route }: Props) {
   const { bookId } = route.params;
   const { user } = useAuth();
+  const { isPro, openPaywall } = useSubscription();
   const [book, setBook] = useState<Book | null>(null);
   const [sessions, setSessions] = useState<ReadingSession[]>([]);
   const [allTags, setAllTags] = useState<Tag[]>([]);
@@ -64,9 +67,10 @@ export default function BookDetailScreen({ navigation, route }: Props) {
 
   const fetchData = useCallback(async () => {
     if (!user) return;
+    const sessionQuery = supabase.from('reading_sessions').select('*').eq('book_id', bookId).order('started_at', { ascending: false });
     const [{ data: b }, { data: s }, { data: btRows }, { data: tagRows }] = await Promise.all([
       supabase.from('books').select('*').eq('id', bookId).single(),
-      supabase.from('reading_sessions').select('*').eq('book_id', bookId).order('started_at', { ascending: false }),
+      isPro ? sessionQuery : sessionQuery.limit(10),
       supabase.from('book_tags').select('tag_id').eq('book_id', bookId),
       supabase.from('tags').select('id,name').eq('user_id', user.id).order('created_at'),
     ]);
@@ -86,7 +90,7 @@ export default function BookDetailScreen({ navigation, route }: Props) {
       .eq('book_id', bookId)
       .order('created_at', { ascending: true });
     setMemos((memoRows as BookMemo[]) ?? []);
-  }, [bookId, user]);
+  }, [bookId, user, isPro]);
 
   useFocusEffect(useCallback(() => { fetchData().finally(() => setLoading(false)); }, [fetchData]));
 
@@ -148,6 +152,7 @@ export default function BookDetailScreen({ navigation, route }: Props) {
 
   async function createTag() {
     if (!newTagName.trim() || !user) return;
+    if (!isPro && allTags.length >= 3) { openPaywall(); return; }
     setCreatingTag(true);
     const { data } = await supabase
       .from('tags')
@@ -281,6 +286,13 @@ export default function BookDetailScreen({ navigation, route }: Props) {
     estimatedStr = formatDuration(Math.round(secPerPage * remaining));
   }
 
+  const totalPagesRead = sessions.reduce(
+    (acc, s) => acc + Math.max(0, (s.end_page ?? 0) - (s.start_page ?? 0)), 0
+  );
+  const avgPace = sessions.length > 0 && totalPagesRead > 0
+    ? Math.round(totalPagesRead / sessions.length)
+    : null;
+
   const isFirstEver = sessions.length === 0 && (book.read_count ?? 0) === 0;
   const appliedTags = allTags.filter((t) => bookTagIds.includes(t.id));
 
@@ -373,7 +385,7 @@ export default function BookDetailScreen({ navigation, route }: Props) {
             <View style={{ alignItems: 'flex-end' }}>
               <Text style={s.progressLabel}>Remaining</Text>
               <Text style={s.remainingText}>あと {remaining} ページ</Text>
-              {estimatedStr && <Text style={s.estimatedText}>約 {estimatedStr}</Text>}
+              {estimatedStr && <Text style={s.estimatedText}>完読まで約 {estimatedStr}</Text>}
             </View>
           </View>
           <View style={s.progressBar}>
@@ -391,6 +403,7 @@ export default function BookDetailScreen({ navigation, route }: Props) {
           {[
             { label: 'Total Time', value: formatDuration(totalSeconds), unit: '' },
             { label: 'Sessions', value: String(sessions.length), unit: '回' },
+            { label: 'Avg Pace', value: avgPace ? String(avgPace) + 'p' : '—', unit: avgPace ? '/ 回' : '' },
             { label: 'Times Read', value: String(book.read_count ?? 0), unit: '回' },
           ].map((item) => (
             <View key={item.label} style={s.statCard}>
@@ -517,33 +530,37 @@ export default function BookDetailScreen({ navigation, route }: Props) {
           {sessions.length === 0 ? (
             <Text style={s.noSessions}>記録なし</Text>
           ) : (
-            sessions.map((session) => {
-              const pagesRead = (session.end_page ?? 0) - (session.start_page ?? 0);
-              return (
-                <View key={session.id} style={s.sessionItem}>
-                  <View style={s.sessionTop}>
-                    <View>
-                      <Text style={s.sessionDate}>{formatSessionDate(session.started_at)}</Text>
-                      <Text style={s.sessionPages}>
-                        p.{session.start_page} → p.{session.end_page}
-                        {pagesRead > 0 ? ` · ${pagesRead}ページ` : ''}
-                      </Text>
+            <>
+              {sessions.map((session) => {
+                const pagesRead = (session.end_page ?? 0) - (session.start_page ?? 0);
+                return (
+                  <View key={session.id} style={s.sessionItem}>
+                    <View style={s.sessionTop}>
+                      <View>
+                        <Text style={s.sessionDate}>{formatSessionDate(session.started_at)}</Text>
+                        <Text style={s.sessionPages}>
+                          p.{session.start_page} → p.{session.end_page}
+                          {pagesRead > 0 ? ` · ${pagesRead}ページ` : ''}
+                        </Text>
+                      </View>
+                      <Text style={s.sessionDuration}>{formatDuration(session.duration_seconds)}</Text>
                     </View>
-                    <Text style={s.sessionDuration}>{formatDuration(session.duration_seconds)}</Text>
                   </View>
-                </View>
-              );
-            })
+                );
+              })}
+              {!isPro && sessions.length >= 10 && (
+                <TouchableOpacity style={s.proSessionBanner} onPress={openPaywall} activeOpacity={0.8}>
+                  <Text style={s.proSessionBannerText}>Proプランで全履歴を表示</Text>
+                </TouchableOpacity>
+              )}
+            </>
           )}
         </View>
         <View style={{ height: 16 }} />
       </ScrollView>
 
       {/* Start reading sheet (first-time only) */}
-      <Modal visible={startSheetOpen} transparent animationType="slide">
-        <TouchableOpacity style={s.overlay} activeOpacity={1} onPress={() => setStartSheetOpen(false)} />
-        <View style={s.sheet}>
-          <View style={s.sheetHandle} />
+      <BottomSheet visible={startSheetOpen} onClose={() => setStartSheetOpen(false)} sheetStyle={s.sheet}>
           <Text style={s.sheetHeading}>この本を読むのは{'\n'}はじめてですか？</Text>
           <Text style={s.sheetSub}>以前読んだことがある場合、記録を追加できます。</Text>
           <TouchableOpacity style={s.saveBtn} onPress={goFirstTime} activeOpacity={0.8}>
@@ -599,14 +616,10 @@ export default function BookDetailScreen({ navigation, route }: Props) {
               ? <ActivityIndicator color={C.ink} />
               : <Text style={s.cancelBtnText}>前回の続きから読む</Text>}
           </TouchableOpacity>
-        </View>
-      </Modal>
+      </BottomSheet>
 
       {/* Finish confirmation sheet */}
-      <Modal visible={finishSheetOpen} transparent animationType="slide">
-        <TouchableOpacity style={s.overlay} activeOpacity={1} onPress={() => setFinishSheetOpen(false)} />
-        <View style={s.sheet}>
-          <View style={s.sheetHandle} />
+      <BottomSheet visible={finishSheetOpen} onClose={() => setFinishSheetOpen(false)} sheetStyle={s.sheet}>
           <View style={s.sheetBookInfo}>
             <Text style={s.sheetAuthor}>{book.author}</Text>
             <Text style={s.sheetTitle}>{book.title}</Text>
@@ -631,14 +644,10 @@ export default function BookDetailScreen({ navigation, route }: Props) {
           <TouchableOpacity style={s.cancelBtn} onPress={() => setFinishSheetOpen(false)} activeOpacity={0.8}>
             <Text style={s.cancelBtnText}>キャンセル</Text>
           </TouchableOpacity>
-        </View>
-      </Modal>
+      </BottomSheet>
 
       {/* Delete bottom sheet */}
-      <Modal visible={deleteSheetOpen} transparent animationType="slide">
-        <TouchableOpacity style={s.overlay} activeOpacity={1} onPress={() => setDeleteSheetOpen(false)} />
-        <View style={s.sheet}>
-          <View style={s.sheetHandle} />
+      <BottomSheet visible={deleteSheetOpen} onClose={() => setDeleteSheetOpen(false)} sheetStyle={s.sheet}>
           <View style={s.sheetBookInfo}>
             <Text style={s.sheetAuthor}>{book.author}</Text>
             <Text style={s.sheetTitle}>{book.title}</Text>
@@ -654,15 +663,10 @@ export default function BookDetailScreen({ navigation, route }: Props) {
           <TouchableOpacity style={s.cancelBtn} onPress={() => setDeleteSheetOpen(false)} activeOpacity={0.8}>
             <Text style={s.cancelBtnText}>キャンセル</Text>
           </TouchableOpacity>
-        </View>
-      </Modal>
+      </BottomSheet>
 
       {/* Memo add sheet */}
-      <Modal visible={memoAddOpen} transparent animationType="slide">
-        <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : 'height'} style={{ flex: 1 }}>
-          <TouchableOpacity style={s.overlay} activeOpacity={1} onPress={() => { setMemoAddOpen(false); setEditingMemoId(null); setMemoAddText(''); }} />
-          <View style={s.sheet}>
-            <View style={s.sheetHandle} />
+      <BottomSheet visible={memoAddOpen} onClose={() => { setMemoAddOpen(false); setEditingMemoId(null); setMemoAddText(''); }} sheetStyle={s.sheet} disableClose={savingMemo} keyboardAvoid>
             <Text style={s.sheetHeadingSmall}>{editingMemoId ? 'メモを編集' : 'メモを追加'}</Text>
             <View style={s.manualRow}>
               <View style={{ flex: 1 }}>
@@ -705,15 +709,10 @@ export default function BookDetailScreen({ navigation, route }: Props) {
             <TouchableOpacity style={s.cancelBtn} onPress={() => { setMemoAddOpen(false); setEditingMemoId(null); setMemoAddText(''); }} activeOpacity={0.8}>
               <Text style={s.cancelBtnText}>キャンセル</Text>
             </TouchableOpacity>
-          </View>
-        </KeyboardAvoidingView>
-      </Modal>
+      </BottomSheet>
 
       {/* Tag sheet */}
-      <Modal visible={tagSheetOpen} transparent animationType="slide">
-        <TouchableOpacity style={s.overlay} activeOpacity={1} onPress={() => setTagSheetOpen(false)} />
-        <View style={s.sheet}>
-          <View style={s.sheetHandle} />
+      <BottomSheet visible={tagSheetOpen} onClose={() => setTagSheetOpen(false)} sheetStyle={s.sheet} keyboardAvoid>
           <Text style={s.sheetHeadingSmall}>タグを管理する</Text>
           <ScrollView style={{ maxHeight: 240 }} showsVerticalScrollIndicator={false}>
             {allTags.length === 0 ? (
@@ -750,14 +749,10 @@ export default function BookDetailScreen({ navigation, route }: Props) {
                 : <Text style={s.newTagBtnText}>作成</Text>}
             </TouchableOpacity>
           </View>
-        </View>
-      </Modal>
+      </BottomSheet>
 
       {/* Memo delete confirmation sheet */}
-      <Modal visible={!!deletingMemo} transparent animationType="slide">
-        <TouchableOpacity style={s.overlay} activeOpacity={1} onPress={() => setDeletingMemo(null)} />
-        <View style={s.sheet}>
-          <View style={s.sheetHandle} />
+      <BottomSheet visible={!!deletingMemo} onClose={() => setDeletingMemo(null)} sheetStyle={s.sheet}>
           <Text style={s.sheetHeading}>メモを削除しますか？</Text>
           {deletingMemo && (
             <View style={s.memoDeletePreview}>
@@ -771,8 +766,7 @@ export default function BookDetailScreen({ navigation, route }: Props) {
           <TouchableOpacity style={s.cancelBtn} onPress={() => setDeletingMemo(null)} activeOpacity={0.8}>
             <Text style={s.cancelBtnText}>キャンセル</Text>
           </TouchableOpacity>
-        </View>
-      </Modal>
+      </BottomSheet>
 
       {/* Manual session sheet */}
       {manualSessionOpen && (
@@ -854,10 +848,7 @@ function ManualSessionSheet({
   }
 
   return (
-    <Modal visible transparent animationType="slide">
-      <TouchableOpacity style={s.overlay} activeOpacity={1} onPress={onCancel} />
-      <View style={s.sheet}>
-        <View style={s.sheetHandle} />
+    <BottomSheet visible onClose={onCancel} sheetStyle={s.sheet} disableClose={saving}>
         <Text style={s.sheetHeadingSmall}>読書記録を手動追加</Text>
         {error && <Text style={s.manualError}>{error}</Text>}
         <View style={s.manualRow}>
@@ -936,8 +927,7 @@ function ManualSessionSheet({
         <TouchableOpacity style={s.cancelBtn} onPress={onCancel} activeOpacity={0.8}>
           <Text style={s.cancelBtnText}>キャンセル</Text>
         </TouchableOpacity>
-      </View>
-    </Modal>
+    </BottomSheet>
   );
 }
 
@@ -988,14 +978,14 @@ const s = StyleSheet.create({
   progressPct: { fontFamily: F.cormorantLight, fontSize: 64, color: C.ink, lineHeight: 70 },
   progressPctUnit: { fontFamily: F.cormorantLight, fontSize: 22, color: C.muted },
   remainingText: { fontFamily: F.shippori, fontSize: 14, color: C.ink2, lineHeight: 22 },
-  estimatedText: { fontFamily: F.zen, fontSize: 11, color: C.muted, marginTop: 2 },
+  estimatedText: { fontFamily: F.zen, fontSize: 12, color: C.ink2, marginTop: 4 },
   progressBar: { height: 2, backgroundColor: C.line, borderRadius: 1, marginBottom: 8 },
   progressFill: { height: 2, backgroundColor: C.ink, borderRadius: 1 },
   progressFooter: { flexDirection: 'row', justifyContent: 'space-between' },
   progressPageLabel: { fontFamily: F.cormorant, fontSize: 12, color: C.muted2 },
   progressCurrent: { fontFamily: F.cormorant, fontSize: 12, color: C.ink2 },
-  statsRow: { flexDirection: 'row', gap: 8, marginBottom: 24 },
-  statCard: { flex: 1, backgroundColor: C.bg, borderRadius: 2, padding: 12 },
+  statsRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginBottom: 24 },
+  statCard: { width: '48%', backgroundColor: C.bg, borderRadius: 2, padding: 12 },
   statLabel: { fontFamily: F.zen, fontSize: 9, letterSpacing: 2, color: C.muted, textTransform: 'uppercase', marginBottom: 4 },
   statValue: { fontFamily: F.cormorant, fontSize: 20, color: C.ink },
   statUnit: { fontFamily: F.zen, fontSize: 11, color: C.muted },
@@ -1020,6 +1010,11 @@ const s = StyleSheet.create({
   reviewText: { fontFamily: F.zen, fontSize: 13, color: C.ink, lineHeight: 24 },
   reviewPlaceholder: { color: C.muted2 },
   noSessions: { fontFamily: F.zen, fontSize: 12, color: C.muted2 },
+  proSessionBanner: {
+    marginTop: 12, paddingVertical: 12, borderRadius: 2,
+    borderWidth: 1, borderColor: C.line, alignItems: 'center',
+  },
+  proSessionBannerText: { fontFamily: F.zen, fontSize: 11, color: C.muted2 },
   sessionItem: { borderTopWidth: 1, borderTopColor: C.line, paddingVertical: 14 },
   sessionTop: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
   sessionDate: { fontFamily: F.shippori, fontSize: 13, color: C.ink2, marginBottom: 2 },
@@ -1036,13 +1031,10 @@ const s = StyleSheet.create({
     flexDirection: 'row', gap: 10, alignItems: 'flex-start',
     backgroundColor: C.bg, borderRadius: 4, padding: 14, marginBottom: 20,
   },
-  overlay: { ...StyleSheet.absoluteFillObject, backgroundColor: 'rgba(0,0,0,0.5)' },
   sheet: {
-    position: 'absolute', bottom: 0, left: 0, right: 0,
     backgroundColor: C.paper, borderTopLeftRadius: 16, borderTopRightRadius: 16,
     padding: 28, paddingBottom: 48,
   },
-  sheetHandle: { width: 40, height: 3, backgroundColor: C.line, borderRadius: 2, alignSelf: 'center', marginBottom: 24 },
   sheetBookInfo: { paddingBottom: 20, marginBottom: 20, borderBottomWidth: 1, borderBottomColor: C.line },
   sheetAuthor: { fontFamily: F.zen, fontSize: 11, color: C.muted, marginBottom: 4 },
   sheetTitle: { fontFamily: F.shippori, fontSize: 16, color: C.ink },

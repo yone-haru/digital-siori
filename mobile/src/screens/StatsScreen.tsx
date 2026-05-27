@@ -8,6 +8,7 @@ import { useFocusEffect } from '@react-navigation/native';
 import { CalendarPicker } from '../components/CalendarPicker';
 import { supabase } from '../lib/supabase';
 import { useAuth } from '../contexts/AuthContext';
+import { useSubscription } from '../contexts/SubscriptionContext';
 import { C, F } from '../lib/colors';
 import {
   formatDuration, splitDuration, toJSTDate,
@@ -33,6 +34,7 @@ const BAR_MAX_H = 48;
 
 export default function StatsScreen() {
   const { user } = useAuth();
+  const { isPro, openPaywall } = useSubscription();
   const [tab, setTab] = useState<'today' | 'all'>('today');
   const [dayStats, setDayStats] = useState<DayStat[]>([]);
   const [overall, setOverall] = useState<OverallStats | null>(null);
@@ -43,12 +45,18 @@ export default function StatsScreen() {
     if (!user) return;
     const todayStr = new Date(Date.now() + 9 * 3600 * 1000).toISOString().slice(0, 10);
 
+    let sessionsQuery = supabase.from('reading_sessions')
+      .select('id,book_id,started_at,start_page,end_page,duration_seconds')
+      .eq('user_id' as never, user.id)
+      .order('started_at', { ascending: false });
+    if (!isPro) {
+      const cutoff = new Date();
+      cutoff.setMonth(cutoff.getMonth() - 3);
+      sessionsQuery = sessionsQuery.gte('started_at', cutoff.toISOString());
+    }
     const [{ data: books }, { data: sessions }] = await Promise.all([
       supabase.from('books').select('id,title,author,cover_url,current_page,total_pages,status'),
-      supabase.from('reading_sessions')
-        .select('id,book_id,started_at,start_page,end_page,duration_seconds')
-        .eq('user_id' as never, user.id)
-        .order('started_at', { ascending: false }),
+      sessionsQuery,
     ]);
 
     const bookMap = new Map((books ?? []).map((b) => [b.id, b]));
@@ -99,7 +107,7 @@ export default function StatsScreen() {
       readingCount: (books ?? []).filter((b) => b.status === 'reading').length,
       totalPages, streak: calcStreak(allDates, todayStr),
     });
-  }, [user]);
+  }, [user, isPro]);
 
   useFocusEffect(useCallback(() => { fetchStats().finally(() => setLoading(false)); }, [fetchStats]));
 
@@ -134,6 +142,13 @@ export default function StatsScreen() {
           ))}
         </View>
       </View>
+
+      {!isPro && (
+        <TouchableOpacity style={s.freeBanner} onPress={openPaywall} activeOpacity={0.8}>
+          <Text style={s.freeBannerText}>直近3ヶ月を表示中</Text>
+          <Text style={s.freeBannerLink}>Proで全期間表示 →</Text>
+        </TouchableOpacity>
+      )}
 
       <ScrollView
         showsVerticalScrollIndicator={false}
@@ -343,6 +358,14 @@ function OverallTab({ overall }: { overall: OverallStats }) {
 const s = StyleSheet.create({
   container: { flex: 1, backgroundColor: C.paper },
   header: { paddingHorizontal: 28, paddingTop: 10, paddingBottom: 0 },
+  freeBanner: {
+    flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center',
+    marginHorizontal: 28, marginTop: 8, marginBottom: 2,
+    paddingHorizontal: 14, paddingVertical: 8,
+    borderRadius: 2, borderWidth: 1, borderColor: C.line,
+  },
+  freeBannerText: { fontFamily: F.zen, fontSize: 11, color: C.muted2 },
+  freeBannerLink: { fontFamily: F.zen, fontSize: 11, color: C.ink, textDecorationLine: 'underline' },
   headerLabel: { fontFamily: F.zen, fontSize: 10, letterSpacing: 2.5, color: C.muted, textTransform: 'uppercase', marginBottom: 4 },
   headerTitle: { fontFamily: F.shippori, fontSize: 28, color: C.ink, marginBottom: 16 },
   tabBar: { flexDirection: 'row', borderBottomWidth: 1, borderBottomColor: C.line },

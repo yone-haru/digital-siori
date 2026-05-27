@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import {
   View, Text, TouchableOpacity, StyleSheet, TextInput,
-  Modal, ScrollView, KeyboardAvoidingView, Platform,
+  ScrollView, AppState,
 } from 'react-native';
 import { DialInput } from '../components/DialInput';
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -12,6 +12,7 @@ import { supabase } from '../lib/supabase';
 import { useAuth } from '../contexts/AuthContext';
 import { F } from '../lib/colors';
 import { formatDuration } from '../lib/utils';
+import { BottomSheet } from '../components/BottomSheet';
 import type { RootStackParamList } from '../types/navigation';
 
 type Props = {
@@ -31,6 +32,7 @@ export default function ReadingTimerScreen({ navigation, route }: Props) {
 
   const [elapsed, setElapsed] = useState(0);
   const [isRunning, setIsRunning] = useState(true);
+  const [isPaused, setIsPaused] = useState(false);
   const [currentPage, setCurrentPage] = useState(startPage);
   const [phase, setPhase] = useState<Phase>('running');
   const [error, setError] = useState<string | null>(null);
@@ -48,6 +50,8 @@ export default function ReadingTimerScreen({ navigation, route }: Props) {
   const mountTime = useRef(Date.now());
   const startedAt = useRef(new Date().toISOString());
   const frozenElapsed = useRef(0);
+  const pauseAccum = useRef(0);
+  const isRunningRef = useRef(true);
 
   useEffect(() => {
     supabase
@@ -66,9 +70,33 @@ export default function ReadingTimerScreen({ navigation, route }: Props) {
     return () => clearInterval(id);
   }, [isRunning]);
 
+  useEffect(() => { isRunningRef.current = isRunning; }, [isRunning]);
+
+  useEffect(() => {
+    const sub = AppState.addEventListener('change', (state) => {
+      if (state === 'active' && isRunningRef.current) {
+        setElapsed(Math.floor((Date.now() - mountTime.current) / 1000));
+      }
+    });
+    return () => sub.remove();
+  }, []);
+
+  function handlePause() {
+    pauseAccum.current = elapsed;
+    setIsPaused(true);
+    setIsRunning(false);
+  }
+
+  function handleResume() {
+    mountTime.current = Date.now() - pauseAccum.current * 1000;
+    setIsPaused(false);
+    setIsRunning(true);
+  }
+
   const handleStop = useCallback(() => {
     frozenElapsed.current = elapsed;
     setIsRunning(false);
+    setIsPaused(false);
     setPhase('confirm');
   }, [elapsed]);
 
@@ -241,9 +269,18 @@ export default function ReadingTimerScreen({ navigation, route }: Props) {
           )}
 
           {phase === 'running' && (
-            <TouchableOpacity style={s.actionBtn} onPress={handleStop} activeOpacity={0.85}>
-              <Text style={s.actionBtnText}>読書をおわる</Text>
-            </TouchableOpacity>
+            <>
+              <TouchableOpacity
+                style={s.pauseBtn}
+                onPress={isPaused ? handleResume : handlePause}
+                activeOpacity={0.85}
+              >
+                <Text style={s.pauseBtnText}>{isPaused ? '再開する' : '一時停止'}</Text>
+              </TouchableOpacity>
+              <TouchableOpacity style={s.actionBtn} onPress={handleStop} activeOpacity={0.85}>
+                <Text style={s.actionBtnText}>読書をおわる</Text>
+              </TouchableOpacity>
+            </>
           )}
           {(phase === 'confirm' || phase === 'saving') && (
             <TouchableOpacity
@@ -259,11 +296,12 @@ export default function ReadingTimerScreen({ navigation, route }: Props) {
       </SafeAreaView>
 
       {/* Memo modal */}
-      <Modal visible={memoOpen} transparent animationType="slide">
-        <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : 'height'} style={{ flex: 1 }}>
-          <TouchableOpacity style={s.memoOverlay} activeOpacity={1} onPress={() => setMemoOpen(false)} />
-          <View style={s.memoSheet}>
-            <View style={s.memoHandle} />
+      <BottomSheet
+        visible={memoOpen}
+        onClose={() => { setMemoOpen(false); setEditingMemoId(null); setMemoText(''); }}
+        sheetStyle={s.memoSheet}
+        keyboardAvoid
+      >
             <Text style={s.memoTitle}>MEMO</Text>
 
             {/* Existing memos */}
@@ -334,15 +372,10 @@ export default function ReadingTimerScreen({ navigation, route }: Props) {
                 </TouchableOpacity>
               </View>
             </View>
-          </View>
-        </KeyboardAvoidingView>
-      </Modal>
+      </BottomSheet>
 
       {/* Memo delete confirmation sheet */}
-      <Modal visible={!!deletingMemo} transparent animationType="slide">
-        <TouchableOpacity style={s.memoOverlay} activeOpacity={1} onPress={() => setDeletingMemo(null)} />
-        <View style={s.memoSheet}>
-          <View style={s.memoHandle} />
+      <BottomSheet visible={!!deletingMemo} onClose={() => setDeletingMemo(null)} sheetStyle={s.memoSheet}>
           <Text style={s.memoDeleteHeading}>メモを削除しますか？</Text>
           {deletingMemo && (
             <View style={s.memoDeletePreview}>
@@ -358,8 +391,7 @@ export default function ReadingTimerScreen({ navigation, route }: Props) {
               <Text style={s.memoDeleteBtnText}>削除する</Text>
             </TouchableOpacity>
           </View>
-        </View>
-      </Modal>
+      </BottomSheet>
 
       {/* Session saved modal */}
       {phase === 'saved' && (
@@ -465,19 +497,21 @@ const s = StyleSheet.create({
     fontFamily: F.zen, fontSize: 11, color: 'rgba(255,255,255,0.3)',
     textAlign: 'center', marginBottom: 12,
   },
+  pauseBtn: {
+    height: 44, borderWidth: 1, borderColor: 'rgba(255,255,255,0.25)', borderRadius: 2,
+    alignItems: 'center', justifyContent: 'center', marginBottom: 10,
+  },
+  pauseBtnText: { fontFamily: F.zen, fontSize: 12, letterSpacing: 1.5, color: 'rgba(255,255,255,0.6)' },
   actionBtn: {
     height: 52, backgroundColor: '#F7F5EF', borderRadius: 2,
     alignItems: 'center', justifyContent: 'center',
   },
   actionBtnText: { fontFamily: F.zenMed, fontSize: 13, letterSpacing: 1.5, color: '#0A0A0A' },
   // Memo sheet
-  memoOverlay: { ...StyleSheet.absoluteFillObject, backgroundColor: 'rgba(0,0,0,0.5)' },
   memoSheet: {
-    position: 'absolute', bottom: 0, left: 0, right: 0,
     backgroundColor: '#F7F5EF', borderTopLeftRadius: 4, borderTopRightRadius: 4,
     maxHeight: '80%',
   },
-  memoHandle: { width: 40, height: 3, backgroundColor: '#E3DFD6', borderRadius: 2, alignSelf: 'center', marginTop: 12, marginBottom: 4 },
   memoTitle: {
     fontFamily: F.zen, fontSize: 10, letterSpacing: 2.5, color: '#6E6B65',
     textTransform: 'uppercase', paddingHorizontal: 28, paddingBottom: 12,

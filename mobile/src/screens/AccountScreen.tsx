@@ -1,7 +1,7 @@
-import React, { useState } from 'react';
+import React, { useState, useRef, useEffect } from 'react';
 import {
   View, Text, TextInput, TouchableOpacity, StyleSheet,
-  Alert, ActivityIndicator, ScrollView, Modal, Image,
+  Alert, ActivityIndicator, ScrollView, Image, Keyboard,
 } from 'react-native';
 import * as ImagePicker from 'expo-image-picker';
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -9,7 +9,9 @@ import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import Svg, { Path, Circle } from 'react-native-svg';
 import { supabase } from '../lib/supabase';
 import { useAuth } from '../contexts/AuthContext';
+import { useSubscription } from '../contexts/SubscriptionContext';
 import { C, F } from '../lib/colors';
+import { BottomSheet } from '../components/BottomSheet';
 import type { RootStackParamList } from '../types/navigation';
 
 const DANGER = '#C77B6F';
@@ -28,6 +30,7 @@ type Props = { navigation: NativeStackNavigationProp<RootStackParamList, 'Accoun
 
 export default function AccountScreen({ navigation }: Props) {
   const { user, signOut } = useAuth();
+  const { isPro, openPaywall } = useSubscription();
   const [name, setName] = useState<string>(
     (user?.user_metadata?.display_name as string) ?? user?.email?.split('@')[0] ?? ''
   );
@@ -49,17 +52,29 @@ export default function AccountScreen({ navigation }: Props) {
 
   const email = user?.email ?? '';
   const avatarColor = user?.id ? getAvatarColor(user.id) : AVATAR_COLORS[0];
+
   const displayName = name.trim() || email.split('@')[0] || 'User';
   const initial = displayName[0]?.toUpperCase() ?? '?';
 
+  const nameInputRef = useRef<TextInput>(null);
+  const nameRef = useRef(name);
+  nameRef.current = name;
+
   async function saveName() {
-    const trimmed = name.trim();
-    if (!trimmed || trimmed.length > 20) return;
+    nameInputRef.current?.blur();
     setEditingName(false);
+    const trimmed = nameRef.current.trim();
+    if (!trimmed || trimmed.length > 20) return;
     setSavingName(true);
     await supabase.auth.updateUser({ data: { display_name: trimmed } });
     setSavingName(false);
   }
+
+  useEffect(() => {
+    if (!editingName) return;
+    const sub = Keyboard.addListener('keyboardDidHide', saveName);
+    return () => sub.remove();
+  }, [editingName]);
 
   async function handlePickAvatar() {
     const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
@@ -113,6 +128,14 @@ export default function AccountScreen({ navigation }: Props) {
     if (msg.includes('Invalid login credentials') || msg.includes('invalid_credentials')) return '現在のパスワードが正しくありません。';
     if (msg.includes('Too many requests')) return 'しばらく時間をおいてから再試行してください。';
     return 'パスワードの変更に失敗しました。';
+  }
+
+  async function handleSendPasswordReset() {
+    if (!email) return;
+    await supabase.auth.resetPasswordForEmail(email, { redirectTo: 'digitalshiori://reset-password' });
+    setPwSheetOpen(false);
+    setCurrentPassword(''); setNewPassword(''); setConfirmPassword('');
+    Alert.alert('メールを送信しました', 'パスワード再設定用のリンクをメールアドレスに送りました。');
   }
 
   async function handleChangePassword() {
@@ -200,6 +223,7 @@ export default function AccountScreen({ navigation }: Props) {
               <Text style={s.rowLabel}>表示名</Text>
               {editingName ? (
                 <TextInput
+                  ref={nameInputRef}
                   style={s.nameInput}
                   value={name}
                   onChangeText={setName}
@@ -207,7 +231,6 @@ export default function AccountScreen({ navigation }: Props) {
                   placeholder="名前を入力"
                   placeholderTextColor={C.muted2}
                   maxLength={20}
-                  onBlur={saveName}
                   returnKeyType="done"
                   onSubmitEditing={saveName}
                 />
@@ -220,7 +243,11 @@ export default function AccountScreen({ navigation }: Props) {
             <View style={s.rowRight}>
               {savingName
                 ? <ActivityIndicator size="small" color={C.muted2} />
-                : <Text style={s.editHint}>{editingName ? '' : '編集'}</Text>}
+                : !editingName && (
+                  <TouchableOpacity onPress={() => setEditingName(true)} hitSlop={8}>
+                    <Text style={s.editHint}>編集</Text>
+                  </TouchableOpacity>
+                )}
             </View>
           </View>
         </View>
@@ -242,6 +269,38 @@ export default function AccountScreen({ navigation }: Props) {
             </View>
             <Text style={s.editHint}>変更</Text>
           </TouchableOpacity>
+        </View>
+
+        {/* Plan section */}
+        <Text style={[s.sectionLabel, { marginTop: 28 }]}>Plan</Text>
+        <View style={s.sectionCard}>
+          {isPro ? (
+            <>
+              <View style={s.row}>
+                <View style={{ flex: 1 }}>
+                  <Text style={s.rowLabel}>プラン</Text>
+                  <Text style={s.rowValue}>Pro（有効）</Text>
+                </View>
+              </View>
+            </>
+          ) : (
+            <>
+              <View style={s.row}>
+                <View style={{ flex: 1 }}>
+                  <Text style={s.rowLabel}>プラン</Text>
+                  <Text style={s.rowValue}>無料</Text>
+                </View>
+              </View>
+              <View style={s.rowDivider} />
+              <TouchableOpacity style={s.row} onPress={openPaywall} activeOpacity={0.7}>
+                <View style={{ flex: 1 }}>
+                  <Text style={s.rowLabel}>アップグレード</Text>
+                  <Text style={s.rowValue}>Pro プランを見る</Text>
+                </View>
+                <Text style={s.editHint}>詳細</Text>
+              </TouchableOpacity>
+            </>
+          )}
         </View>
 
         {/* Danger zone */}
@@ -272,109 +331,100 @@ export default function AccountScreen({ navigation }: Props) {
       </ScrollView>
 
       {/* Logout confirmation sheet */}
-      <Modal visible={logoutSheetOpen} transparent animationType="slide">
-        <TouchableOpacity style={ds.overlay} activeOpacity={1} onPress={() => setLogoutSheetOpen(false)} />
-        <View style={ds.sheet}>
-          <View style={ds.handle} />
-          <Text style={ds.heading}>ログアウトしますか？</Text>
-          <Text style={ds.body}>ログアウトすると、再度ログインが必要になります。</Text>
-          <TouchableOpacity style={ds.deleteBtn} onPress={() => { setLogoutSheetOpen(false); signOut(); }} activeOpacity={0.8}>
-            <Text style={ds.deleteBtnText}>ログアウト</Text>
-          </TouchableOpacity>
-          <TouchableOpacity style={ds.cancelBtn} onPress={() => setLogoutSheetOpen(false)} activeOpacity={0.7}>
-            <Text style={ds.cancelBtnText}>キャンセル</Text>
-          </TouchableOpacity>
-        </View>
-      </Modal>
+      <BottomSheet visible={logoutSheetOpen} onClose={() => setLogoutSheetOpen(false)} sheetStyle={ds.sheet}>
+        <Text style={ds.heading}>ログアウトしますか？</Text>
+        <Text style={ds.body}>ログアウトすると、再度ログインが必要になります。</Text>
+        <TouchableOpacity style={ds.deleteBtn} onPress={() => { setLogoutSheetOpen(false); signOut(); }} activeOpacity={0.8}>
+          <Text style={ds.deleteBtnText}>ログアウト</Text>
+        </TouchableOpacity>
+        <TouchableOpacity style={ds.cancelBtn} onPress={() => setLogoutSheetOpen(false)} activeOpacity={0.7}>
+          <Text style={ds.cancelBtnText}>キャンセル</Text>
+        </TouchableOpacity>
+      </BottomSheet>
 
       {/* Password change sheet */}
-      <Modal visible={pwSheetOpen} transparent animationType="slide">
-        <TouchableOpacity style={ds.overlay} activeOpacity={1} onPress={() => { if (!savingPassword) { setPwSheetOpen(false); setCurrentPassword(''); setNewPassword(''); setConfirmPassword(''); } }} />
-        <View style={ds.sheet}>
-          <View style={ds.handle} />
-          <Text style={ds.heading}>パスワードを変更</Text>
-          <Text style={ds.fieldLabel}>現在のパスワード</Text>
-          <TextInput
-            style={ds.input}
-            value={currentPassword}
-            onChangeText={setCurrentPassword}
-            placeholder="現在のパスワード"
-            placeholderTextColor={C.muted2}
-            secureTextEntry
-            autoCapitalize="none"
-            autoCorrect={false}
-          />
-          <Text style={[ds.fieldLabel, { marginTop: 4 }]}>新しいパスワード（6文字以上）</Text>
-          <TextInput
-            style={ds.input}
-            value={newPassword}
-            onChangeText={setNewPassword}
-            placeholder="新しいパスワード"
-            placeholderTextColor={C.muted2}
-            secureTextEntry
-            autoCapitalize="none"
-            autoCorrect={false}
-          />
-          <Text style={[ds.fieldLabel, { marginTop: 4 }]}>確認用パスワード</Text>
-          <TextInput
-            style={ds.input}
-            value={confirmPassword}
-            onChangeText={setConfirmPassword}
-            placeholder="もう一度入力"
-            placeholderTextColor={C.muted2}
-            secureTextEntry
-            autoCapitalize="none"
-            autoCorrect={false}
-          />
-          <TouchableOpacity
-            style={[ds.saveBtn, (!currentPassword || newPassword.length < 6 || confirmPassword.length < 6 || savingPassword) && { opacity: 0.4 }]}
-            onPress={handleChangePassword}
-            disabled={!currentPassword || newPassword.length < 6 || confirmPassword.length < 6 || savingPassword}
-            activeOpacity={0.8}
-          >
-            {savingPassword
-              ? <ActivityIndicator color={C.paper} />
-              : <Text style={ds.saveBtnText}>変更する</Text>}
-          </TouchableOpacity>
-          <TouchableOpacity style={ds.cancelBtn} onPress={() => { setPwSheetOpen(false); setCurrentPassword(''); setNewPassword(''); setConfirmPassword(''); }} disabled={savingPassword} activeOpacity={0.7}>
-            <Text style={ds.cancelBtnText}>キャンセル</Text>
-          </TouchableOpacity>
-        </View>
-      </Modal>
+      <BottomSheet visible={pwSheetOpen} onClose={() => { setPwSheetOpen(false); setCurrentPassword(''); setNewPassword(''); setConfirmPassword(''); }} sheetStyle={ds.sheet} disableClose={savingPassword} keyboardAvoid>
+        <Text style={ds.heading}>パスワードを変更</Text>
+        <Text style={ds.fieldLabel}>現在のパスワード</Text>
+        <TextInput
+          style={ds.input}
+          value={currentPassword}
+          onChangeText={setCurrentPassword}
+          placeholder="現在のパスワード"
+          placeholderTextColor={C.muted2}
+          secureTextEntry
+          autoCapitalize="none"
+          autoCorrect={false}
+        />
+        <Text style={[ds.fieldLabel, { marginTop: 4 }]}>新しいパスワード（6文字以上）</Text>
+        <TextInput
+          style={ds.input}
+          value={newPassword}
+          onChangeText={setNewPassword}
+          placeholder="新しいパスワード"
+          placeholderTextColor={C.muted2}
+          secureTextEntry
+          autoCapitalize="none"
+          autoCorrect={false}
+        />
+        <Text style={[ds.fieldLabel, { marginTop: 4 }]}>確認用パスワード</Text>
+        <TextInput
+          style={ds.input}
+          value={confirmPassword}
+          onChangeText={setConfirmPassword}
+          placeholder="もう一度入力"
+          placeholderTextColor={C.muted2}
+          secureTextEntry
+          autoCapitalize="none"
+          autoCorrect={false}
+        />
+        <TouchableOpacity
+          style={[ds.saveBtn, (!currentPassword || newPassword.length < 6 || confirmPassword.length < 6 || savingPassword) && { opacity: 0.4 }]}
+          onPress={handleChangePassword}
+          disabled={!currentPassword || newPassword.length < 6 || confirmPassword.length < 6 || savingPassword}
+          activeOpacity={0.8}
+        >
+          {savingPassword
+            ? <ActivityIndicator color={C.paper} />
+            : <Text style={ds.saveBtnText}>変更する</Text>}
+        </TouchableOpacity>
+        <TouchableOpacity style={ds.cancelBtn} onPress={() => { setPwSheetOpen(false); setCurrentPassword(''); setNewPassword(''); setConfirmPassword(''); }} disabled={savingPassword} activeOpacity={0.7}>
+          <Text style={ds.cancelBtnText}>キャンセル</Text>
+        </TouchableOpacity>
+        <TouchableOpacity onPress={handleSendPasswordReset} hitSlop={8} style={ds.forgotRow} disabled={savingPassword} activeOpacity={0.7}>
+          <Text style={ds.forgotLink}>パスワードをお忘れの場合</Text>
+        </TouchableOpacity>
+      </BottomSheet>
 
       {/* Delete account sheet */}
-      <Modal visible={deleteSheetOpen} transparent animationType="slide">
-        <TouchableOpacity style={ds.overlay} activeOpacity={1} onPress={() => { if (!deleting) setDeleteSheetOpen(false); }} />
-        <View style={ds.sheet}>
-          <View style={ds.handle} />
-          <Text style={ds.heading}>アカウントを削除しますか？</Text>
-          <Text style={ds.body}>
-            本棚・読書履歴・タグがすべて削除されます。この操作は取り消せません。
-          </Text>
-          <Text style={ds.fieldLabel}>確認のため「削除する」と入力してください</Text>
-          <TextInput
-            style={ds.input}
-            value={deleteConfirmText}
-            onChangeText={setDeleteConfirmText}
-            placeholder="削除する"
-            placeholderTextColor={C.muted2}
-            autoCapitalize="none"
-          />
-          <TouchableOpacity
-            style={[ds.deleteBtn, (deleteConfirmText !== '削除する' || deleting) && { opacity: 0.4 }]}
-            onPress={handleDeleteAccount}
-            disabled={deleteConfirmText !== '削除する' || deleting}
-            activeOpacity={0.8}
-          >
-            {deleting
-              ? <ActivityIndicator color="#fff" />
-              : <Text style={ds.deleteBtnText}>アカウントを削除する</Text>}
-          </TouchableOpacity>
-          <TouchableOpacity style={ds.cancelBtn} onPress={() => setDeleteSheetOpen(false)} disabled={deleting} activeOpacity={0.7}>
-            <Text style={ds.cancelBtnText}>キャンセル</Text>
-          </TouchableOpacity>
-        </View>
-      </Modal>
+      <BottomSheet visible={deleteSheetOpen} onClose={() => setDeleteSheetOpen(false)} sheetStyle={ds.sheet} disableClose={deleting} keyboardAvoid>
+        <Text style={ds.heading}>アカウントを削除しますか？</Text>
+        <Text style={ds.body}>
+          本棚・読書履歴・タグがすべて削除されます。この操作は取り消せません。
+        </Text>
+        <Text style={ds.fieldLabel}>確認のため「削除する」と入力してください</Text>
+        <TextInput
+          style={ds.input}
+          value={deleteConfirmText}
+          onChangeText={setDeleteConfirmText}
+          placeholder="削除する"
+          placeholderTextColor={C.muted2}
+          autoCapitalize="none"
+        />
+        <TouchableOpacity
+          style={[ds.deleteBtn, (deleteConfirmText !== '削除する' || deleting) && { opacity: 0.4 }]}
+          onPress={handleDeleteAccount}
+          disabled={deleteConfirmText !== '削除する' || deleting}
+          activeOpacity={0.8}
+        >
+          {deleting
+            ? <ActivityIndicator color="#fff" />
+            : <Text style={ds.deleteBtnText}>アカウントを削除する</Text>}
+        </TouchableOpacity>
+        <TouchableOpacity style={ds.cancelBtn} onPress={() => setDeleteSheetOpen(false)} disabled={deleting} activeOpacity={0.7}>
+          <Text style={ds.cancelBtnText}>キャンセル</Text>
+        </TouchableOpacity>
+      </BottomSheet>
     </SafeAreaView>
   );
 }
@@ -430,13 +480,10 @@ const s = StyleSheet.create({
 });
 
 const ds = StyleSheet.create({
-  overlay: { ...StyleSheet.absoluteFillObject, backgroundColor: 'rgba(0,0,0,0.5)' },
   sheet: {
-    position: 'absolute', bottom: 0, left: 0, right: 0,
     backgroundColor: C.paper, borderTopLeftRadius: 16, borderTopRightRadius: 16,
     padding: 28, paddingBottom: 48,
   },
-  handle: { width: 40, height: 3, backgroundColor: C.line, borderRadius: 2, alignSelf: 'center', marginBottom: 24 },
   heading: { fontFamily: F.shippori, fontSize: 20, color: C.ink, marginBottom: 10, lineHeight: 30 },
   body: { fontFamily: F.zen, fontSize: 12, color: C.muted, lineHeight: 20, marginBottom: 20 },
   fieldLabel: { fontFamily: F.zen, fontSize: 10, letterSpacing: 2, color: C.muted, textTransform: 'uppercase', marginBottom: 8 },
@@ -459,4 +506,6 @@ const ds = StyleSheet.create({
     alignItems: 'center', justifyContent: 'center',
   },
   cancelBtnText: { fontFamily: F.zen, fontSize: 13, letterSpacing: 1.5, color: C.ink },
+  forgotRow: { alignItems: 'center', paddingTop: 16 },
+  forgotLink: { fontFamily: F.zen, fontSize: 11, color: C.muted2, textDecorationLine: 'underline' },
 });

@@ -1,10 +1,11 @@
-import React from 'react';
+import React, { useEffect } from 'react';
 import { View, ActivityIndicator } from 'react-native';
 import { NavigationContainer } from '@react-navigation/native';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { StatusBar } from 'expo-status-bar';
+import * as Linking from 'expo-linking';
 import {
   useFonts,
   CormorantGaramond_300Light,
@@ -21,6 +22,9 @@ import {
 import Svg, { Rect, Circle, Path } from 'react-native-svg';
 
 import { AuthProvider, useAuth } from './src/contexts/AuthContext';
+import { SubscriptionProvider, useSubscription } from './src/contexts/SubscriptionContext';
+import { ProPaywallSheet } from './src/components/ProPaywallSheet';
+import { supabase } from './src/lib/supabase';
 import { C, F } from './src/lib/colors';
 import type { RootStackParamList, AuthStackParamList, MainTabParamList } from './src/types/navigation';
 
@@ -32,6 +36,7 @@ import StatsScreen from './src/screens/StatsScreen';
 import BookDetailScreen from './src/screens/BookDetailScreen';
 import ReadingTimerScreen from './src/screens/ReadingTimerScreen';
 import AccountScreen from './src/screens/AccountScreen';
+import ResetPasswordScreen from './src/screens/ResetPasswordScreen';
 
 const RootStack = createNativeStackNavigator<RootStackParamList>();
 const AuthStack = createNativeStackNavigator<AuthStackParamList>();
@@ -67,7 +72,7 @@ function StatsIcon({ color }: { color: string }) {
 
 function AuthNavigator() {
   return (
-    <AuthStack.Navigator screenOptions={{ headerShown: false }}>
+    <AuthStack.Navigator screenOptions={{ headerShown: false, gestureEnabled: true }}>
       <AuthStack.Screen name="Login" component={LoginScreen} />
       <AuthStack.Screen name="Signup" component={SignupScreen} />
     </AuthStack.Navigator>
@@ -116,8 +121,13 @@ function MainNavigator() {
   );
 }
 
+function GlobalPaywallSheet() {
+  const { paywallOpen, closePaywall } = useSubscription();
+  return <ProPaywallSheet visible={paywallOpen} onClose={closePaywall} />;
+}
+
 function RootNavigator() {
-  const { user, loading } = useAuth();
+  const { user, loading, isRecovering } = useAuth();
 
   if (loading) {
     return (
@@ -129,7 +139,9 @@ function RootNavigator() {
 
   return (
     <RootStack.Navigator screenOptions={{ headerShown: false }}>
-      {user ? (
+      {isRecovering ? (
+        <RootStack.Screen name="ResetPassword" component={ResetPasswordScreen} />
+      ) : user ? (
         <>
           <RootStack.Screen name="Main" component={MainNavigator} />
           <RootStack.Screen name="BookDetail" component={BookDetailScreen} />
@@ -148,6 +160,15 @@ function RootNavigator() {
 }
 
 export default function App() {
+  useEffect(() => {
+    async function handleUrl(url: string) {
+      try { await supabase.auth.exchangeCodeForSession(url); } catch {}
+    }
+    Linking.getInitialURL().then(url => { if (url) handleUrl(url); });
+    const sub = Linking.addEventListener('url', ({ url }) => handleUrl(url));
+    return () => sub.remove();
+  }, []);
+
   const [fontsLoaded] = useFonts({
     CormorantGaramond_300Light,
     CormorantGaramond_400Regular,
@@ -168,10 +189,13 @@ export default function App() {
   return (
     <SafeAreaProvider>
       <AuthProvider>
-        <NavigationContainer>
-          <RootNavigator />
-        </NavigationContainer>
-        <StatusBar style="dark" />
+        <SubscriptionProvider>
+          <NavigationContainer>
+            <RootNavigator />
+          </NavigationContainer>
+          <GlobalPaywallSheet />
+          <StatusBar style="dark" />
+        </SubscriptionProvider>
       </AuthProvider>
     </SafeAreaProvider>
   );
