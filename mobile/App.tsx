@@ -138,7 +138,7 @@ function RootNavigator() {
   }
 
   return (
-    <RootStack.Navigator screenOptions={{ headerShown: false }}>
+    <RootStack.Navigator screenOptions={{ headerShown: false, gestureEnabled: true }}>
       {isRecovering ? (
         <RootStack.Screen name="ResetPassword" component={ResetPasswordScreen} />
       ) : user ? (

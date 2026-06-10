@@ -1,7 +1,10 @@
 import React, { createContext, useContext, useEffect, useState } from 'react';
 import Purchases, { LOG_LEVEL } from 'react-native-purchases';
 import { Platform, Alert } from 'react-native';
+import Constants from 'expo-constants';
 import { useAuth } from './AuthContext';
+
+const isExpoGo = Constants.appOwnership === 'expo';
 
 const ENTITLEMENT = 'pro';
 const IOS_KEY = process.env.EXPO_PUBLIC_REVENUECAT_IOS_KEY ?? '';
@@ -36,10 +39,13 @@ export function SubscriptionProvider({ children }: { children: React.ReactNode }
   const [paywallOpen, setPaywallOpen] = useState(false);
 
   useEffect(() => {
+    if (isExpoGo) {
+      setLoading(false);
+      return;
+    }
     const apiKey = Platform.OS === 'ios' ? IOS_KEY : ANDROID_KEY;
     if (!apiKey) {
-      // RevenueCat未設定の開発中は全機能解放
-      setIsPro(true);
+      setIsPro(false);
       setLoading(false);
       return;
     }
@@ -48,13 +54,13 @@ export function SubscriptionProvider({ children }: { children: React.ReactNode }
   }, []);
 
   useEffect(() => {
-    if (!user) {
+    if (isExpoGo || !user) {
       setIsPro(false);
       setLoading(false);
       return;
     }
     const apiKey = Platform.OS === 'ios' ? IOS_KEY : ANDROID_KEY;
-    if (!apiKey) { setIsPro(true); setLoading(false); return; }
+    if (!apiKey) { setIsPro(false); setLoading(false); return; }
 
     Purchases.logIn(user.id).then(({ customerInfo }) => {
       setIsPro(!!customerInfo.entitlements.active[ENTITLEMENT]);

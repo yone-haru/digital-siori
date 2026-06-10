@@ -12,29 +12,83 @@ import { BookmarkLogo } from '../components/BookmarkLogo';
 
 type Props = { navigation: NativeStackNavigationProp<AuthStackParamList, 'Signup'> };
 
+function isValidEmail(email: string) {
+  return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
+}
+
+function parseError(message: string): string {
+  if (message.includes('already registered') || message.includes('User already registered')) {
+    return 'このメールアドレスはすでに登録済みです。ログインしてください。';
+  }
+  if (message.includes('invalid') && message.includes('email')) {
+    return 'メールアドレスの形式が正しくありません。';
+  }
+  if (message.includes('Password') || message.includes('password')) {
+    return 'パスワードは6文字以上で設定してください。';
+  }
+  if (message.includes('rate limit') || message.includes('rate_limit')) {
+    return '時間をおいてから再度お試しください。';
+  }
+  if (message.includes('network') || message.includes('fetch')) {
+    return 'ネットワークエラーが発生しました。接続を確認してください。';
+  }
+  return '登録に失敗しました。しばらくしてから再度お試しください。';
+}
+
 export default function SignupScreen({ navigation }: Props) {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [sent, setSent] = useState(false);
 
   async function handleSignup() {
-    if (!email.trim() || !password) return;
+    setError(null);
+    if (!email.trim()) {
+      setError('メールアドレスを入力してください。');
+      return;
+    }
+    if (!isValidEmail(email.trim())) {
+      setError('メールアドレスの形式が正しくありません。');
+      return;
+    }
+    if (!password) {
+      setError('パスワードを入力してください。');
+      return;
+    }
     if (password.length < 6) {
       setError('パスワードは6文字以上で設定してください。');
       return;
     }
     setLoading(true);
-    setError(null);
     const { error: err } = await supabase.auth.signUp({ email: email.trim(), password });
     if (err) {
-      if (err.message.includes('already registered')) {
-        setError('このメールアドレスはすでに登録済みです。');
-      } else {
-        setError('登録に失敗しました。もう一度お試しください。');
-      }
+      setError(parseError(err.message));
+    } else {
+      setSent(true);
     }
     setLoading(false);
+  }
+
+  if (sent) {
+    return (
+      <SafeAreaView style={s.container}>
+        <View style={s.sentContainer}>
+          <BookmarkLogo />
+          <View style={s.sentBox}>
+            <Text style={s.sentTitle}>メールを送信しました</Text>
+            <Text style={s.sentBody}>
+              <Text style={s.sentEmail}>{email.trim()}</Text>
+              {'\n'}に確認メールを送りました。{'\n\n'}
+              メール内のリンクをタップして{'\n'}登録を完了してください。
+            </Text>
+          </View>
+          <TouchableOpacity onPress={() => navigation.navigate('Login')}>
+            <Text style={s.sentLink}>ログイン画面へ</Text>
+          </TouchableOpacity>
+        </View>
+      </SafeAreaView>
+    );
   }
 
   return (
@@ -145,5 +199,26 @@ const s = StyleSheet.create({
   link: {
     fontFamily: F.zen, fontSize: 12, color: C.ink,
     textDecorationLine: 'underline',
+  },
+  sentContainer: {
+    flex: 1, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 36,
+  },
+  sentBox: {
+    marginTop: 48, marginBottom: 40, alignItems: 'center',
+  },
+  sentTitle: {
+    fontFamily: F.shippori, fontSize: 22, color: C.ink2,
+    marginBottom: 24, letterSpacing: 1,
+  },
+  sentBody: {
+    fontFamily: F.zen, fontSize: 13, color: C.muted,
+    lineHeight: 22, textAlign: 'center',
+  },
+  sentEmail: {
+    fontFamily: F.zen, fontSize: 13, color: C.ink,
+  },
+  sentLink: {
+    fontFamily: F.zen, fontSize: 13, color: C.ink,
+    textDecorationLine: 'underline', letterSpacing: 1,
   },
 });

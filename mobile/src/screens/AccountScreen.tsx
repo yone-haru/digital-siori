@@ -1,8 +1,9 @@
 import React, { useState, useRef, useEffect } from 'react';
 import {
   View, Text, TextInput, TouchableOpacity, StyleSheet,
-  Alert, ActivityIndicator, ScrollView, Image, Keyboard,
+  Alert, ActivityIndicator, ScrollView, Image, Keyboard, Linking,
 } from 'react-native';
+import Constants from 'expo-constants';
 import * as ImagePicker from 'expo-image-picker';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
@@ -42,6 +43,9 @@ export default function AccountScreen({ navigation }: Props) {
   const [savingName, setSavingName] = useState(false);
   const [logoutSheetOpen, setLogoutSheetOpen] = useState(false);
   const [deleteSheetOpen, setDeleteSheetOpen] = useState(false);
+  const [contactSheetOpen, setContactSheetOpen] = useState(false);
+  const [contactCategory, setContactCategory] = useState<'改善案' | 'バグ報告' | 'その他'>('改善案');
+  const [contactBody, setContactBody] = useState('');
   const [deleteConfirmText, setDeleteConfirmText] = useState('');
   const [deleting, setDeleting] = useState(false);
   const [pwSheetOpen, setPwSheetOpen] = useState(false);
@@ -167,12 +171,29 @@ export default function AccountScreen({ navigation }: Props) {
     }
   }
 
+  function handleSendContact() {
+    const subject = encodeURIComponent(`【Yondle】${contactCategory}`);
+    const body = encodeURIComponent(`カテゴリ: ${contactCategory}\n\n${contactBody}\n\n---\nアプリバージョン: 1.0.0\nメールアドレス: ${email}`);
+    Linking.openURL(`mailto:llf.yoneharu@gmail.com?subject=${subject}&body=${body}`);
+    setContactSheetOpen(false);
+    setContactBody('');
+    setContactCategory('改善案');
+  }
+
   async function handleDeleteAccount() {
     if (!user) return;
     setDeleting(true);
-    await supabase.from('reading_sessions').delete().eq('user_id', user.id);
-    await supabase.from('books').delete().eq('user_id', user.id);
-    await signOut();
+    try {
+      await supabase.from('book_memos').delete().eq('user_id', user.id);
+      await supabase.from('book_tags').delete().eq('user_id', user.id);
+      await supabase.from('reading_sessions').delete().eq('user_id', user.id);
+      await supabase.from('books').delete().eq('user_id', user.id);
+      await supabase.from('tags').delete().eq('user_id', user.id);
+      await signOut();
+    } catch {
+      setDeleting(false);
+      Alert.alert('エラー', 'アカウントの削除に失敗しました。もう一度お試しください。');
+    }
   }
 
   return (
@@ -303,6 +324,19 @@ export default function AccountScreen({ navigation }: Props) {
           )}
         </View>
 
+        {/* Support section */}
+        <Text style={[s.sectionLabel, { marginTop: 28 }]}>Support</Text>
+        <View style={s.sectionCard}>
+          <TouchableOpacity style={s.row} onPress={() => setContactSheetOpen(true)} activeOpacity={0.7}>
+            <View style={{ flex: 1 }}>
+              <Text style={s.rowLabel}>お問い合わせ</Text>
+            </View>
+            <Svg width="16" height="16" viewBox="0 0 16 16" fill="none">
+              <Path d="M6 4l4 4-4 4" stroke={C.muted2} strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round" />
+            </Svg>
+          </TouchableOpacity>
+        </View>
+
         {/* Danger zone */}
         <View style={[s.sectionCard, { marginTop: 32 }]}>
           <TouchableOpacity style={s.row} onPress={() => setLogoutSheetOpen(true)} activeOpacity={0.7}>
@@ -326,9 +360,49 @@ export default function AccountScreen({ navigation }: Props) {
 
         {/* Footer */}
         <View style={s.footer}>
-          <Text style={s.footerText}>DIGITAL BOOKMARK · v 1.0.0</Text>
+          <Text style={s.footerText}>DIGITAL BOOKMARK · v {Constants.expoConfig?.version ?? '1.0.0'}</Text>
         </View>
       </ScrollView>
+
+      {/* Contact sheet */}
+      <BottomSheet visible={contactSheetOpen} onClose={() => { setContactSheetOpen(false); setContactBody(''); setContactCategory('改善案'); }} sheetStyle={ds.sheet} keyboardAvoid>
+        <Text style={ds.heading}>お問い合わせ</Text>
+        <Text style={ds.fieldLabel}>カテゴリ</Text>
+        <View style={cs.categoryRow}>
+          {(['改善案', 'バグ報告', 'その他'] as const).map((cat) => (
+            <TouchableOpacity
+              key={cat}
+              style={[cs.categoryBtn, contactCategory === cat && cs.categoryBtnActive]}
+              onPress={() => setContactCategory(cat)}
+              activeOpacity={0.7}
+            >
+              <Text style={[cs.categoryBtnText, contactCategory === cat && cs.categoryBtnTextActive]}>{cat}</Text>
+            </TouchableOpacity>
+          ))}
+        </View>
+        <Text style={[ds.fieldLabel, { marginTop: 16 }]}>内容</Text>
+        <TextInput
+          style={cs.bodyInput}
+          value={contactBody}
+          onChangeText={setContactBody}
+          placeholder="お気軽にご意見・ご要望をお寄せください"
+          placeholderTextColor={C.muted2}
+          multiline
+          textAlignVertical="top"
+          maxLength={1000}
+        />
+        <TouchableOpacity
+          style={[ds.saveBtn, !contactBody.trim() && { opacity: 0.4 }]}
+          onPress={handleSendContact}
+          disabled={!contactBody.trim()}
+          activeOpacity={0.8}
+        >
+          <Text style={ds.saveBtnText}>メールアプリで送信</Text>
+        </TouchableOpacity>
+        <TouchableOpacity style={ds.cancelBtn} onPress={() => { setContactSheetOpen(false); setContactBody(''); setContactCategory('改善案'); }} activeOpacity={0.7}>
+          <Text style={ds.cancelBtnText}>キャンセル</Text>
+        </TouchableOpacity>
+      </BottomSheet>
 
       {/* Logout confirmation sheet */}
       <BottomSheet visible={logoutSheetOpen} onClose={() => setLogoutSheetOpen(false)} sheetStyle={ds.sheet}>
@@ -477,6 +551,22 @@ const s = StyleSheet.create({
   dangerSub: { fontFamily: F.zen, fontSize: 11, color: C.muted2, marginTop: 3, letterSpacing: 0.2 },
   footer: { alignItems: 'center', paddingTop: 40, paddingBottom: 8 },
   footerText: { fontFamily: F.cormorant, fontSize: 11, color: C.muted2, letterSpacing: 3 },
+});
+
+const cs = StyleSheet.create({
+  categoryRow: { flexDirection: 'row', gap: 8, marginBottom: 4 },
+  categoryBtn: {
+    paddingHorizontal: 14, paddingVertical: 7, borderRadius: 99,
+    borderWidth: 1, borderColor: C.line,
+  },
+  categoryBtnActive: { backgroundColor: C.ink, borderColor: C.ink },
+  categoryBtnText: { fontFamily: F.zen, fontSize: 12, color: C.muted },
+  categoryBtnTextActive: { color: C.paper },
+  bodyInput: {
+    fontFamily: F.zen, fontSize: 14, color: C.ink,
+    borderWidth: 1, borderColor: C.line, borderRadius: 4,
+    padding: 12, height: 120, marginBottom: 20,
+  },
 });
 
 const ds = StyleSheet.create({

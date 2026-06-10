@@ -52,7 +52,7 @@ export function ProPaywallSheet({ visible, onClose }: Props) {
         <View style={s.badge}>
           <Text style={s.badgeText}>PRO</Text>
         </View>
-        <Text style={s.title}>デジタル栞 Pro</Text>
+        <Text style={s.title}>Yondle Pro</Text>
         <Text style={s.subtitle}>読書体験をもっと自由に</Text>
       </View>
 

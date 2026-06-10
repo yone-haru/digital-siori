@@ -1,16 +1,48 @@
-// デモ用データ投入スクリプト
-// 実行: node scripts/seed-demo.js
+// デモ用データ投入スクリプト（開発専用）
+// 実行前に .env.local に SUPABASE_SERVICE_ROLE_KEY を設定すること
+//
+// 使い方:
+//   1. .env.local を作成し以下を設定:
+//      SUPABASE_SERVICE_ROLE_KEY=<Supabaseダッシュボード > Settings > API > service_role key>
+//   2. node scripts/seed-demo.js
+//
+// ⚠️  SERVICE_ROLE_KEY は RLS をバイパスするため、絶対に git にコミットしないこと
 
 const { createClient } = require('@supabase/supabase-js');
 const https = require('https');
+const fs = require('fs');
+const path = require('path');
 
-const GOOGLE_BOOKS_KEY  = 'AIzaSyDKvES0vv80M8PYVPmDzKiACdvI5SjxaZk';
-const SUPABASE_URL      = 'https://frwiuopbwjnsqpolhafk.supabase.co';
-const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImZyd2l1b3Bid2puc3Fwb2xoYWZrIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzY5ODg0OTQsImV4cCI6MjA5MjU2NDQ5NH0.wZA_XIBQypN1ZWPK-gEP3gXJDXAqX8IhxHrTPM6btYA';
-const SERVICE_ROLE_KEY  = '***REDACTED-SERVICE-ROLE-KEY***';
+// .env と .env.local を読み込む（dotenv 不要）
+function loadEnvFile(filePath) {
+  if (!fs.existsSync(filePath)) return;
+  const lines = fs.readFileSync(filePath, 'utf8').split('\n');
+  for (const line of lines) {
+    const trimmed = line.trim();
+    if (!trimmed || trimmed.startsWith('#')) continue;
+    const eqIdx = trimmed.indexOf('=');
+    if (eqIdx < 0) continue;
+    const key = trimmed.slice(0, eqIdx).trim();
+    const val = trimmed.slice(eqIdx + 1).trim().replace(/^["']|["']$/g, '');
+    if (key && !process.env[key]) process.env[key] = val;
+  }
+}
+loadEnvFile(path.join(__dirname, '../.env'));
+loadEnvFile(path.join(__dirname, '../.env.local'));
 
-const TEST_EMAIL    = 'demo@digitalshiori.app';
-const TEST_PASSWORD = 'Demo1234!';
+const GOOGLE_BOOKS_KEY  = process.env.EXPO_PUBLIC_GOOGLE_BOOKS_API_KEY ?? '';
+const SUPABASE_URL      = process.env.EXPO_PUBLIC_SUPABASE_URL ?? '';
+const SUPABASE_ANON_KEY = process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY ?? '';
+const SERVICE_ROLE_KEY  = process.env.SUPABASE_SERVICE_ROLE_KEY ?? '';
+
+if (!SUPABASE_URL || !SUPABASE_ANON_KEY || !SERVICE_ROLE_KEY) {
+  console.error('❌ 環境変数が不足しています。.env と .env.local を確認してください。');
+  console.error('   必要な変数: EXPO_PUBLIC_SUPABASE_URL, EXPO_PUBLIC_SUPABASE_ANON_KEY, SUPABASE_SERVICE_ROLE_KEY');
+  process.exit(1);
+}
+
+const TEST_EMAIL    = process.env.SEED_TEST_EMAIL    ?? 'demo@digitalshiori.app';
+const TEST_PASSWORD = process.env.SEED_TEST_PASSWORD ?? 'Demo1234!';
 
 // admin クライアント（メール確認をスキップしてユーザー作成するため）
 const adminClient = createClient(SUPABASE_URL, SERVICE_ROLE_KEY, {
@@ -62,23 +94,101 @@ function daysAgo(n, hour = 21, minute = 0) {
 // ── 本データ ──────────────────────────────────────────────
 const BOOKS = [
   {
-    title: 'ノルウェイの森（上）',
-    author: '村上春樹',
+    title: '成瀬は天下を取りにいく',
+    author: '宮島未奈',
+    total_pages: 240,
+    current_page: 240,
+    status: 'finished',
+    rating: 5.0,
+    review: '成瀬あかりのキャラクターが強烈すぎて、読んでいる間中ずっと笑っていた。滋賀愛が溢れていて、読後に地元への愛着を再発見した気分になる。本屋大賞納得の一冊。',
+    read_count: 1,
+    started_at: daysAgo(60),
+    finished_at: daysAgo(52),
+    created_at: daysAgo(62),
+  },
+  {
+    title: 'そして、バトンは渡された',
+    author: '瀬尾まいこ',
+    total_pages: 344,
+    current_page: 344,
+    status: 'finished',
+    rating: 4.5,
+    review: '親が何人も変わるのに優子がどんどん前向きになっていく不思議さ。読み終わった後、家族ってなんだろうとずっと考えた。本屋大賞納得。',
+    read_count: 1,
+    started_at: daysAgo(110),
+    finished_at: daysAgo(95),
+    created_at: daysAgo(115),
+  },
+  {
+    title: 'しろがねの葉',
+    author: '千早茜',
+    total_pages: 320,
+    current_page: 320,
+    status: 'finished',
+    rating: 4.0,
+    review: '石見銀山を舞台にした戦国時代の物語。ウメの視点から描かれる過酷な生の重さが、静かな文体でじわじわと伝わってくる。直木賞納得。',
+    read_count: 1,
+    started_at: daysAgo(145),
+    finished_at: daysAgo(130),
+    created_at: daysAgo(148),
+  },
+  {
+    title: '推し、燃ゆ',
+    author: '宇佐見りん',
+    total_pages: 160,
+    current_page: 160,
+    status: 'finished',
+    rating: 4.0,
+    review: '推しへの執着を「背骨」と表現した一文が忘れられない。短いのにこれだけ密度があるのはすごい。芥川賞納得。',
+    read_count: 1,
+    started_at: daysAgo(80),
+    finished_at: daysAgo(75),
+    created_at: daysAgo(82),
+  },
+  {
+    title: '六人の嘘つきな大学生',
+    author: '浅倉秋成',
+    total_pages: 312,
+    current_page: 312,
+    status: 'finished',
+    rating: 4.5,
+    review: '就活という身近な舞台でここまでのミステリーを書けるとは思わなかった。最後の真相は完全に予想外だった。一気読み必至。',
+    read_count: 1,
+    started_at: daysAgo(40),
+    finished_at: daysAgo(32),
+    created_at: daysAgo(42),
+  },
+  {
+    title: 'かがみの孤城',
+    author: '辻村深月',
+    total_pages: 552,
+    current_page: 552,
+    status: 'finished',
+    rating: 5.0,
+    review: '伏線の回収が完璧すぎて読後に震えた。学校に行けない子たちへのメッセージが温かく、何度でも読み返したい一冊。',
+    read_count: 2,
+    started_at: daysAgo(200),
+    finished_at: daysAgo(175),
+    created_at: daysAgo(205),
+  },
+  {
+    title: '君の膵臓をたべたい',
+    author: '住野よる',
     total_pages: 296,
     current_page: 296,
     status: 'finished',
-    rating: 5.0,
-    review: '何度読んでも心に刺さる。直子とワタナベの関係が切なくて、読んでいる間ずっと胸が痛かった。村上春樹の文章の密度が好き。',
-    read_count: 2,
-    started_at: daysAgo(90),
-    finished_at: daysAgo(72),
-    created_at: daysAgo(92),
+    rating: 4.5,
+    review: 'タイトルから受けるイメージと全然違う、純粋な青春小説だった。ラストの展開には声が出た。しばらく立ち直れなかった。',
+    read_count: 1,
+    started_at: daysAgo(170),
+    finished_at: daysAgo(158),
+    created_at: daysAgo(172),
   },
   {
-    title: '1Q84 BOOK 1',
-    author: '村上春樹',
-    total_pages: 544,
-    current_page: 341,
+    title: '同志少女よ、敵を撃て',
+    author: '逢坂冬馬',
+    total_pages: 464,
+    current_page: 298,
     status: 'reading',
     rating: null,
     review: null,
@@ -88,100 +198,35 @@ const BOOKS = [
     created_at: daysAgo(20),
   },
   {
-    title: '人間失格',
-    author: '太宰治',
-    total_pages: 256,
-    current_page: 256,
-    status: 'finished',
-    rating: 4.5,
-    review: '主人公の自己嫌悪と世の中への諦観が痛いほど伝わってきた。読むたびに新しい発見がある。',
-    read_count: 3,
-    started_at: daysAgo(120),
-    finished_at: daysAgo(108),
-    created_at: daysAgo(125),
-  },
-  {
-    title: 'コンビニ人間',
-    author: '村田沙耶香',
-    total_pages: 160,
-    current_page: 160,
-    status: 'finished',
-    rating: 4.5,
-    review: '一気読みした。社会の「普通」を問い直す作品で、読後もずっと考えてしまう。',
-    read_count: 1,
-    started_at: daysAgo(55),
-    finished_at: daysAgo(48),
-    created_at: daysAgo(57),
-  },
-  {
-    title: '流浪の月',
-    author: '凪良ゆう',
-    total_pages: 356,
-    current_page: 356,
-    status: 'finished',
-    rating: 4.5,
-    review: '「見える」ことと「わかる」ことは違う、というテーマが終始一貫していて重かった。',
-    read_count: 1,
-    started_at: daysAgo(40),
-    finished_at: daysAgo(28),
-    created_at: daysAgo(42),
-  },
-  {
-    title: 'こころ',
-    author: '夏目漱石',
-    total_pages: 332,
-    current_page: 332,
-    status: 'finished',
-    rating: 4.0,
-    review: '「先生」の孤独が静かに積み上がっていく構造が見事。明治の空気感が伝わってくる。',
-    read_count: 1,
-    started_at: daysAgo(145),
-    finished_at: daysAgo(130),
-    created_at: daysAgo(150),
-  },
-  {
-    title: '砂の女',
-    author: '安部公房',
-    total_pages: 310,
-    current_page: 127,
+    title: '変な家',
+    author: '雨穴',
+    total_pages: 216,
+    current_page: 118,
     status: 'reading',
     rating: null,
     review: null,
     read_count: 0,
-    started_at: daysAgo(8),
+    started_at: daysAgo(10),
     finished_at: null,
-    created_at: daysAgo(9),
+    created_at: daysAgo(11),
   },
   {
-    title: '舟を編む',
-    author: '三浦しをん',
-    total_pages: 304,
-    current_page: 304,
-    status: 'finished',
-    rating: 4.0,
-    review: '辞書作りという地味な仕事への情熱が伝わってきて、読んでいて温かい気持ちになった。',
-    read_count: 1,
-    started_at: daysAgo(80),
-    finished_at: daysAgo(66),
-    created_at: daysAgo(82),
-  },
-  {
-    title: '夜は短し歩けよ乙女',
-    author: '森見登美彦',
-    total_pages: 296,
-    current_page: 89,
+    title: '夜が明ける',
+    author: '西加奈子',
+    total_pages: 430,
+    current_page: 152,
     status: 'rereading',
     rating: 4.5,
     review: null,
     read_count: 1,
-    started_at: daysAgo(5),
+    started_at: daysAgo(6),
     finished_at: null,
-    created_at: daysAgo(200),
+    created_at: daysAgo(160),
   },
   {
-    title: '博士の愛した数式',
-    author: '小川洋子',
-    total_pages: 256,
+    title: '成瀬は信じた道をいく',
+    author: '宮島未奈',
+    total_pages: 224,
     current_page: 0,
     status: 'to_read',
     rating: null,
@@ -189,12 +234,12 @@ const BOOKS = [
     read_count: 0,
     started_at: null,
     finished_at: null,
-    created_at: daysAgo(10),
+    created_at: daysAgo(5),
   },
   {
-    title: '蜜蜂と遠雷',
-    author: '恩田陸',
-    total_pages: 784,
+    title: 'ナミヤ雑貨店の奇蹟',
+    author: '東野圭吾',
+    total_pages: 349,
     current_page: 0,
     status: 'to_read',
     rating: null,
@@ -203,19 +248,6 @@ const BOOKS = [
     started_at: null,
     finished_at: null,
     created_at: daysAgo(3),
-  },
-  {
-    title: '羅生門・鼻',
-    author: '芥川龍之介',
-    total_pages: 208,
-    current_page: 208,
-    status: 'finished',
-    rating: 3.5,
-    review: '短編集として完成度が高い。授業で読んだ時と印象がまったく違った。',
-    read_count: 2,
-    started_at: daysAgo(160),
-    finished_at: daysAgo(155),
-    created_at: daysAgo(165),
   },
 ];
 
@@ -239,22 +271,22 @@ function buildSessions(bookId, userId, runs) {
 }
 
 // ── タグ ─────────────────────────────────────────────────
-const TAG_NAMES = ['純文学', '現代小説', '古典', 'お気に入り'];
+const TAG_NAMES = ['本屋大賞', 'ミステリー', '泣ける', 'お気に入り'];
 
 // ── メモ ─────────────────────────────────────────────────
 // book title → メモ一覧
 const MEMOS_BY_TITLE = {
-  'ノルウェイの森（上）': [
-    { page_number: 38, content: '「死は生の対極としてではなく、その一部として存在している」——この一行でこの小説が完成している気がする。' },
-    { page_number: 112, content: '直子の話し方が独特で、読んでいると自分まで静かになってくる。' },
+  'かがみの孤城': [
+    { page_number: 124, content: '「ここは現実じゃない」と思いながら読んでたのに、いつの間にか城の中が一番リアルに感じられてきた。' },
+    { page_number: 448, content: 'アキの正体を悟った瞬間、最初から読み返したくなった。伏線が完璧すぎる。' },
   ],
-  '人間失格': [
-    { page_number: 15, content: '恥の多い生涯——冒頭からすでに引き込まれる。' },
-    { page_number: 88, content: '堀木との関係が示す「普通」への諦め。' },
+  'そして、バトンは渡された': [
+    { page_number: 62, content: '優子が「お父さん」と呼ぶ場面で泣いてしまった。血のつながりがないことを誰も気にしていない。' },
+    { page_number: 198, content: '森宮さんのキャラクターが独特すぎて好き。こんな親がいたらどんなに楽だろうと思う。' },
   ],
-  '1Q84 BOOK 1': [
-    { page_number: 67, content: '二つの月。世界がずれていく感覚が面白い。' },
-    { page_number: 201, content: 'アオマメとテンゴ、交互に語られる構造が上手い。' },
+  '同志少女よ、敵を撃て': [
+    { page_number: 89, content: 'セラフィマの復讐心が純粋すぎて怖い。戦争の残酷さをこれだけリアルに書けるのか。' },
+    { page_number: 224, content: 'イリーナ教官との関係が変化してきた。敵か味方かじゃなくて、もっと複雑な何かになってる。' },
   ],
 };
 
@@ -329,74 +361,75 @@ async function main() {
   console.log('\n── 読書セッションを登録中...');
 
   const SESSION_DATA = {
-    'ノルウェイの森（上）': [
-      { daysAgoStart: 89, hour: 22, startPage: 0,   endPage: 28,  durationMin: 42 },
-      { daysAgoStart: 87, hour: 20, startPage: 28,  endPage: 61,  durationMin: 55 },
-      { daysAgoStart: 85, hour: 21, startPage: 61,  endPage: 94,  durationMin: 48 },
-      { daysAgoStart: 83, hour: 23, startPage: 94,  endPage: 118, durationMin: 36 },
-      { daysAgoStart: 80, hour: 21, startPage: 118, endPage: 156, durationMin: 62 },
-      { daysAgoStart: 78, hour: 22, startPage: 156, endPage: 192, durationMin: 58 },
-      { daysAgoStart: 76, hour: 20, startPage: 192, endPage: 228, durationMin: 54 },
-      { daysAgoStart: 74, hour: 21, startPage: 228, endPage: 262, durationMin: 50 },
-      { daysAgoStart: 72, hour: 22, startPage: 262, endPage: 296, durationMin: 52 },
+    '成瀬は天下を取りにいく': [
+      { daysAgoStart: 59, hour: 21, startPage: 0,   endPage: 68,  durationMin: 80 },
+      { daysAgoStart: 57, hour: 22, startPage: 68,  endPage: 140, durationMin: 85 },
+      { daysAgoStart: 55, hour: 21, startPage: 140, endPage: 196, durationMin: 68 },
+      { daysAgoStart: 52, hour: 20, startPage: 196, endPage: 240, durationMin: 52 },
     ],
-    '1Q84 BOOK 1': [
-      { daysAgoStart: 17, hour: 21, startPage: 0,   endPage: 38,  durationMin: 58 },
-      { daysAgoStart: 15, hour: 22, startPage: 38,  endPage: 84,  durationMin: 70 },
-      { daysAgoStart: 13, hour: 20, startPage: 84,  endPage: 127, durationMin: 65 },
-      { daysAgoStart: 11, hour: 21, startPage: 127, endPage: 168, durationMin: 60 },
-      { daysAgoStart: 9,  hour: 22, startPage: 168, endPage: 215, durationMin: 72 },
-      { daysAgoStart: 7,  hour: 21, startPage: 215, endPage: 258, durationMin: 66 },
-      { daysAgoStart: 5,  hour: 22, startPage: 258, endPage: 298, durationMin: 60 },
-      { daysAgoStart: 3,  hour: 20, startPage: 298, endPage: 341, durationMin: 65 },
+    'そして、バトンは渡された': [
+      { daysAgoStart: 109, hour: 22, startPage: 0,   endPage: 48,  durationMin: 58 },
+      { daysAgoStart: 107, hour: 21, startPage: 48,  endPage: 104, durationMin: 68 },
+      { daysAgoStart: 104, hour: 22, startPage: 104, endPage: 166, durationMin: 75 },
+      { daysAgoStart: 101, hour: 20, startPage: 166, endPage: 228, durationMin: 75 },
+      { daysAgoStart: 99,  hour: 21, startPage: 228, endPage: 290, durationMin: 75 },
+      { daysAgoStart: 97,  hour: 22, startPage: 290, endPage: 344, durationMin: 65 },
     ],
-    '人間失格': [
-      { daysAgoStart: 119, hour: 22, startPage: 0,   endPage: 42,  durationMin: 50 },
-      { daysAgoStart: 117, hour: 21, startPage: 42,  endPage: 89,  durationMin: 58 },
-      { daysAgoStart: 115, hour: 22, startPage: 89,  endPage: 142, durationMin: 64 },
-      { daysAgoStart: 113, hour: 20, startPage: 142, endPage: 198, durationMin: 68 },
-      { daysAgoStart: 110, hour: 21, startPage: 198, endPage: 256, durationMin: 70 },
+    'しろがねの葉': [
+      { daysAgoStart: 144, hour: 21, startPage: 0,   endPage: 55,  durationMin: 68 },
+      { daysAgoStart: 142, hour: 22, startPage: 55,  endPage: 118, durationMin: 77 },
+      { daysAgoStart: 140, hour: 21, startPage: 118, endPage: 188, durationMin: 85 },
+      { daysAgoStart: 136, hour: 20, startPage: 188, endPage: 256, durationMin: 82 },
+      { daysAgoStart: 130, hour: 22, startPage: 256, endPage: 320, durationMin: 78 },
     ],
-    'コンビニ人間': [
-      { daysAgoStart: 54, hour: 21, startPage: 0,   endPage: 52,  durationMin: 60 },
-      { daysAgoStart: 52, hour: 22, startPage: 52,  endPage: 108, durationMin: 65 },
-      { daysAgoStart: 48, hour: 20, startPage: 108, endPage: 160, durationMin: 62 },
+    '推し、燃ゆ': [
+      { daysAgoStart: 79, hour: 22, startPage: 0,   endPage: 58,  durationMin: 72 },
+      { daysAgoStart: 77, hour: 21, startPage: 58,  endPage: 114, durationMin: 68 },
+      { daysAgoStart: 75, hour: 22, startPage: 114, endPage: 160, durationMin: 58 },
     ],
-    '流浪の月': [
-      { daysAgoStart: 39, hour: 21, startPage: 0,   endPage: 45,  durationMin: 55 },
-      { daysAgoStart: 37, hour: 22, startPage: 45,  endPage: 98,  durationMin: 64 },
-      { daysAgoStart: 35, hour: 21, startPage: 98,  endPage: 152, durationMin: 66 },
-      { daysAgoStart: 33, hour: 20, startPage: 152, endPage: 210, durationMin: 70 },
-      { daysAgoStart: 31, hour: 22, startPage: 210, endPage: 272, durationMin: 75 },
-      { daysAgoStart: 28, hour: 21, startPage: 272, endPage: 356, durationMin: 80 },
+    '六人の嘘つきな大学生': [
+      { daysAgoStart: 39, hour: 21, startPage: 0,   endPage: 52,  durationMin: 60 },
+      { daysAgoStart: 38, hour: 22, startPage: 52,  endPage: 114, durationMin: 74 },
+      { daysAgoStart: 36, hour: 21, startPage: 114, endPage: 180, durationMin: 80 },
+      { daysAgoStart: 34, hour: 20, startPage: 180, endPage: 248, durationMin: 82 },
+      { daysAgoStart: 32, hour: 22, startPage: 248, endPage: 312, durationMin: 78 },
     ],
-    'こころ': [
-      { daysAgoStart: 144, hour: 21, startPage: 0,   endPage: 55,  durationMin: 65 },
-      { daysAgoStart: 141, hour: 22, startPage: 55,  endPage: 118, durationMin: 75 },
-      { daysAgoStart: 138, hour: 20, startPage: 118, endPage: 190, durationMin: 85 },
-      { daysAgoStart: 135, hour: 21, startPage: 190, endPage: 262, durationMin: 86 },
-      { daysAgoStart: 130, hour: 22, startPage: 262, endPage: 332, durationMin: 83 },
+    'かがみの孤城': [
+      { daysAgoStart: 199, hour: 22, startPage: 0,   endPage: 52,  durationMin: 65 },
+      { daysAgoStart: 197, hour: 21, startPage: 52,  endPage: 114, durationMin: 78 },
+      { daysAgoStart: 195, hour: 22, startPage: 114, endPage: 184, durationMin: 88 },
+      { daysAgoStart: 192, hour: 20, startPage: 184, endPage: 260, durationMin: 95 },
+      { daysAgoStart: 189, hour: 21, startPage: 260, endPage: 340, durationMin: 100 },
+      { daysAgoStart: 186, hour: 22, startPage: 340, endPage: 416, durationMin: 95 },
+      { daysAgoStart: 183, hour: 21, startPage: 416, endPage: 488, durationMin: 90 },
+      { daysAgoStart: 180, hour: 22, startPage: 488, endPage: 532, durationMin: 55 },
+      { daysAgoStart: 175, hour: 21, startPage: 532, endPage: 552, durationMin: 25 },
     ],
-    '砂の女': [
-      { daysAgoStart: 7,  hour: 21, startPage: 0,   endPage: 42,  durationMin: 55 },
-      { daysAgoStart: 5,  hour: 22, startPage: 42,  endPage: 88,  durationMin: 60 },
-      { daysAgoStart: 2,  hour: 21, startPage: 88,  endPage: 127, durationMin: 52 },
+    '君の膵臓をたべたい': [
+      { daysAgoStart: 169, hour: 22, startPage: 0,   endPage: 52,  durationMin: 62 },
+      { daysAgoStart: 167, hour: 21, startPage: 52,  endPage: 112, durationMin: 73 },
+      { daysAgoStart: 165, hour: 22, startPage: 112, endPage: 180, durationMin: 82 },
+      { daysAgoStart: 162, hour: 21, startPage: 180, endPage: 240, durationMin: 73 },
+      { daysAgoStart: 158, hour: 22, startPage: 240, endPage: 296, durationMin: 68 },
     ],
-    '舟を編む': [
-      { daysAgoStart: 79, hour: 21, startPage: 0,   endPage: 50,  durationMin: 58 },
-      { daysAgoStart: 77, hour: 22, startPage: 50,  endPage: 106, durationMin: 67 },
-      { daysAgoStart: 74, hour: 20, startPage: 106, endPage: 165, durationMin: 70 },
-      { daysAgoStart: 71, hour: 21, startPage: 165, endPage: 228, durationMin: 75 },
-      { daysAgoStart: 66, hour: 22, startPage: 228, endPage: 304, durationMin: 91 },
+    '同志少女よ、敵を撃て': [
+      { daysAgoStart: 17, hour: 22, startPage: 0,   endPage: 38,  durationMin: 48 },
+      { daysAgoStart: 15, hour: 21, startPage: 38,  endPage: 84,  durationMin: 58 },
+      { daysAgoStart: 13, hour: 22, startPage: 84,  endPage: 130, durationMin: 58 },
+      { daysAgoStart: 11, hour: 21, startPage: 130, endPage: 180, durationMin: 62 },
+      { daysAgoStart: 9,  hour: 22, startPage: 180, endPage: 228, durationMin: 60 },
+      { daysAgoStart: 7,  hour: 21, startPage: 228, endPage: 264, durationMin: 46 },
+      { daysAgoStart: 4,  hour: 22, startPage: 264, endPage: 298, durationMin: 42 },
     ],
-    '夜は短し歩けよ乙女': [
-      { daysAgoStart: 4,  hour: 21, startPage: 0,  endPage: 46, durationMin: 52 },
-      { daysAgoStart: 2,  hour: 22, startPage: 46, endPage: 89, durationMin: 50 },
+    '変な家': [
+      { daysAgoStart: 9,  hour: 22, startPage: 0,   endPage: 38,  durationMin: 45 },
+      { daysAgoStart: 7,  hour: 21, startPage: 38,  endPage: 78,  durationMin: 48 },
+      { daysAgoStart: 5,  hour: 22, startPage: 78,  endPage: 118, durationMin: 50 },
     ],
-    '羅生門・鼻': [
-      { daysAgoStart: 159, hour: 21, startPage: 0,   endPage: 68,  durationMin: 48 },
-      { daysAgoStart: 157, hour: 22, startPage: 68,  endPage: 138, durationMin: 50 },
-      { daysAgoStart: 155, hour: 20, startPage: 138, endPage: 208, durationMin: 52 },
+    '夜が明ける': [
+      { daysAgoStart: 5,  hour: 21, startPage: 0,   endPage: 52,  durationMin: 65 },
+      { daysAgoStart: 3,  hour: 22, startPage: 52,  endPage: 108, durationMin: 70 },
+      { daysAgoStart: 1,  hour: 21, startPage: 108, endPage: 152, durationMin: 55 },
     ],
   };
 
@@ -422,16 +455,18 @@ async function main() {
 
   // ── 本にタグを付ける ──────────────────────────────────────
   const BOOK_TAGS = {
-    'ノルウェイの森（上）': ['純文学', 'お気に入り'],
-    '1Q84 BOOK 1':         ['現代小説'],
-    '人間失格':            ['純文学', '古典', 'お気に入り'],
-    'コンビニ人間':        ['現代小説', 'お気に入り'],
-    '流浪の月':            ['現代小説'],
-    'こころ':              ['純文学', '古典'],
-    '砂の女':              ['純文学'],
-    '舟を編む':            ['現代小説'],
-    '夜は短し歩けよ乙女':  ['現代小説', 'お気に入り'],
-    '羅生門・鼻':          ['古典'],
+    '成瀬は天下を取りにいく':  ['本屋大賞', 'お気に入り'],
+    'そして、バトンは渡された': ['本屋大賞', '泣ける', 'お気に入り'],
+    'しろがねの葉':            ['お気に入り'],
+    '推し、燃ゆ':              ['お気に入り'],
+    '六人の嘘つきな大学生':    ['ミステリー', 'お気に入り'],
+    'かがみの孤城':            ['本屋大賞', '泣ける', 'お気に入り'],
+    '君の膵臓をたべたい':      ['泣ける'],
+    '同志少女よ、敵を撃て':    ['本屋大賞', 'ミステリー'],
+    '変な家':                  ['ミステリー'],
+    'ナミヤ雑貨店の奇蹟':      ['泣ける'],
+    '成瀬は信じた道をいく':    ['本屋大賞', 'お気に入り'],
+    '夜が明ける':              ['お気に入り'],
   };
 
   for (const [title, tags] of Object.entries(BOOK_TAGS)) {
@@ -470,7 +505,7 @@ async function main() {
   パスワード: ${TEST_PASSWORD}
 
 登録内容:
-  本: ${BOOKS.length}冊（読書完了6・読書中2・再読中1・未読2）
+  本: ${BOOKS.length}冊（読書完了7・読書中2・再読中1・未読2）
   タグ: ${TAG_NAMES.length}個
   メモ: ${Object.values(MEMOS_BY_TITLE).flat().length}件
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━`);

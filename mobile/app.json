@@ -1,13 +1,12 @@
 {
   "expo": {
-    "name": "デジタル栞",
+    "name": "Yondle",
     "slug": "digital-shiori",
     "version": "1.0.0",
     "scheme": "digitalshiori",
     "orientation": "portrait",
     "icon": "./assets/icon.png",
     "userInterfaceStyle": "light",
-    "newArchEnabled": true,
     "splash": {
       "image": "./assets/splash-icon.png",
       "resizeMode": "contain",
@@ -19,19 +18,28 @@
     },
     "android": {
       "package": "jp.digitalshiori.app",
+      "versionCode": 1,
       "adaptiveIcon": {
         "foregroundImage": "./assets/adaptive-icon.png",
         "backgroundColor": "#F7F5EF"
       },
       "edgeToEdgeEnabled": true,
-      "predictiveBackGestureEnabled": false
+      "predictiveBackGestureEnabled": false,
+      "permissions": []
     },
     "web": {
       "favicon": "./assets/favicon.png"
     },
     "plugins": [
       "expo-font",
-      "expo-secure-store"
-    ]
+      "expo-secure-store",
+      "expo-file-system"
+    ],
+    "extra": {
+      "eas": {
+        "projectId": "4181fe68-a2d6-44fc-ab6b-8211a31eb633"
+      }
+    },
+    "owner": "yoneharu"
   }
 }

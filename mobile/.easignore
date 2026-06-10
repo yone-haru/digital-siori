@@ -1,0 +1,7 @@
+.git
+node_modules/.cache
+*.log
+*.map
+.env.local
+.env.local.example
+scripts/

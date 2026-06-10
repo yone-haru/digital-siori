@@ -6,7 +6,7 @@ import {
 } from 'react-native';
 import * as ImagePicker from 'expo-image-picker';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { useNavigation } from '@react-navigation/native';
+import { useNavigation, CommonActions } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import Svg, { Circle, Path } from 'react-native-svg';
 import { supabase } from '../lib/supabase';
@@ -80,7 +80,13 @@ export default function AddBookScreen() {
     if (error) {
       setAddError('登録に失敗しました。もう一度お試しください。');
     } else if (data) {
-      nav.navigate('BookDetail', { bookId: data.id });
+      nav.dispatch(CommonActions.reset({
+        index: 1,
+        routes: [
+          { name: 'Main', state: { routes: [{ name: 'Shelf' }, { name: 'Add' }, { name: 'Stats' }], index: 0 } },
+          { name: 'BookDetail', params: { bookId: data.id } },
+        ],
+      }));
     }
   }
 
@@ -219,7 +225,13 @@ export default function AddBookScreen() {
           {showManual && (
             <ManualAddForm
               userId={user?.id ?? ''}
-              onSuccess={(id) => nav.navigate('BookDetail', { bookId: id })}
+              onSuccess={(id) => nav.dispatch(CommonActions.reset({
+                index: 1,
+                routes: [
+                  { name: 'Main', state: { routes: [{ name: 'Shelf' }, { name: 'Add' }, { name: 'Stats' }], index: 0 } },
+                  { name: 'BookDetail', params: { bookId: id } },
+                ],
+              }))}
               onCancel={() => setShowManual(false)}
               canAdd={isPro || bookCount < 20}
               onPaywall={openPaywall}

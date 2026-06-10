@@ -1,16 +1,18 @@
 import React, { useState, useCallback, useMemo, useEffect, useRef } from 'react';
 import {
   View, Text, ScrollView, TouchableOpacity, StyleSheet,
-  Image, RefreshControl, ActivityIndicator, useWindowDimensions,
+  Image, RefreshControl, ActivityIndicator, useWindowDimensions, Alert, Animated, BackHandler,
 } from 'react-native';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useNavigation, useFocusEffect } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
+import Svg, { Path, Circle } from 'react-native-svg';
 import { supabase } from '../lib/supabase';
 import { useAuth } from '../contexts/AuthContext';
 import { C, F } from '../lib/colors';
 import { bookColor } from '../lib/utils';
 import { pendingDelete } from '../lib/pendingDelete';
+import { BottomSheet } from '../components/BottomSheet';
 import type { BookStatus } from '../types';
 import type { RootStackParamList } from '../types/navigation';
 
@@ -67,6 +69,11 @@ export default function ShelfScreen() {
   const [tagFilter, setTagFilter] = useState<string | null>(null);
   const [deletedBook, setDeletedBook] = useState<{ bookId: string; bookTitle: string } | null>(null);
 
+  // 選択モード
+  const [selectionMode, setSelectionMode] = useState(false);
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+  const [tagSheetOpen, setTagSheetOpen] = useState(false);
+
   const fetchData = useCallback(async () => {
     if (!user) return;
     const [{ data: bData }, { data: btRows }, { data: tagRows }] = await Promise.all([
@@ -121,6 +128,66 @@ export default function ShelfScreen() {
     });
   }, [visibleBooks, filter, sortKey, tagFilter]);
 
+  // 選択モード中は戻るジェスチャー/ボタンでキャンセル
+  useEffect(() => {
+    if (!selectionMode) return;
+    const handler = BackHandler.addEventListener('hardwareBackPress', () => {
+      exitSelectionMode();
+      return true;
+    });
+    return () => handler.remove();
+  }, [selectionMode]);
+
+  function enterSelectionMode(id: string) {
+    setSelectionMode(true);
+    setSelectedIds(new Set([id]));
+  }
+
+  function toggleSelection(id: string) {
+    setSelectedIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id); else next.add(id);
+      return next;
+    });
+  }
+
+  function exitSelectionMode() {
+    setSelectionMode(false);
+    setSelectedIds(new Set());
+  }
+
+  async function handleBulkDelete() {
+    Alert.alert(
+      `${selectedIds.size}冊を削除`,
+      'この操作は取り消せません。',
+      [
+        { text: 'キャンセル', style: 'cancel' },
+        {
+          text: '削除', style: 'destructive',
+          onPress: async () => {
+            const ids = Array.from(selectedIds);
+            await supabase.from('books').delete().in('id', ids);
+            setBooks((prev) => prev.filter((b) => !selectedIds.has(b.id)));
+            exitSelectionMode();
+          },
+        },
+      ],
+    );
+  }
+
+  async function handleBulkTag(tagId: string) {
+    const ids = Array.from(selectedIds);
+    const rows = ids.map((bookId) => ({ book_id: bookId, tag_id: tagId, user_id: user!.id }));
+    await supabase.from('book_tags').upsert(rows, { onConflict: 'book_id,tag_id' });
+    setBooks((prev) => prev.map((b) =>
+      selectedIds.has(b.id) && !b.tagIds.includes(tagId)
+        ? { ...b, tagIds: [...b.tagIds, tagId] }
+        : b,
+    ));
+    setTagSheetOpen(false);
+    exitSelectionMode();
+  }
+
   if (loading) {
     return (
       <SafeAreaView style={s.container} edges={['top']}>
@@ -153,6 +220,7 @@ export default function ShelfScreen() {
       <ScrollView
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={C.muted} />}
         showsVerticalScrollIndicator={false}
+        style={{ flex: 1 }}
       >
         {/* Filter tabs */}
         <ScrollView horizontal showsHorizontalScrollIndicator={false}
@@ -220,7 +288,10 @@ export default function ShelfScreen() {
                 <BooksGrid
                   books={group}
                   cardW={cardW}
-                  onPress={(id) => nav.navigate('BookDetail', { bookId: id })}
+                  selectionMode={selectionMode}
+                  selectedIds={selectedIds}
+                  onPress={(id) => selectionMode ? toggleSelection(id) : nav.navigate('BookDetail', { bookId: id })}
+                  onLongPress={(id) => !selectionMode && enterSelectionMode(id)}
                 />
               </View>
             );
@@ -230,13 +301,69 @@ export default function ShelfScreen() {
             <BooksGrid
               books={sorted}
               cardW={cardW}
-              onPress={(id) => nav.navigate('BookDetail', { bookId: id })}
+              selectionMode={selectionMode}
+              selectedIds={selectedIds}
+              onPress={(id) => selectionMode ? toggleSelection(id) : nav.navigate('BookDetail', { bookId: id })}
+              onLongPress={(id) => !selectionMode && enterSelectionMode(id)}
             />
           </View>
         )}
 
         <View style={{ height: 32 }} />
       </ScrollView>
+
+      {/* 選択モード アクションバー */}
+      {selectionMode && (
+        <View style={s.actionBar}>
+          <TouchableOpacity onPress={exitSelectionMode} hitSlop={8} style={s.actionBarCancel}>
+            <Text style={s.actionBarCancelText}>キャンセル</Text>
+          </TouchableOpacity>
+          <Text style={s.actionBarCount}>{selectedIds.size}冊選択中</Text>
+          <View style={s.actionBarButtons}>
+            <TouchableOpacity
+              style={[s.actionBarBtn, !selectedIds.size && { opacity: 0.4 }]}
+              onPress={() => selectedIds.size && setTagSheetOpen(true)}
+              activeOpacity={0.7}
+            >
+              <Svg width="16" height="16" viewBox="0 0 16 16" fill="none">
+                <Path d="M2 2h5.5l6.5 6.5-5.5 5.5L2 7.5V2z" stroke={C.paper} strokeWidth="1.3" strokeLinejoin="round" />
+                <Circle cx="5" cy="5" r="1" fill={C.paper} />
+              </Svg>
+              <Text style={s.actionBarBtnText}>タグ付け</Text>
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={[s.actionBarBtn, s.actionBarBtnDanger, !selectedIds.size && { opacity: 0.4 }]}
+              onPress={() => selectedIds.size && handleBulkDelete()}
+              activeOpacity={0.7}
+            >
+              <Svg width="16" height="16" viewBox="0 0 16 16" fill="none">
+                <Path d="M3 4.5h10M6 4.5V3A1 1 0 0 1 7 2h2a1 1 0 0 1 1 1v1.5M4.5 4.5l.6 8.5A1 1 0 0 0 6 14h4a1 1 0 0 0 1-1l.6-8.5" stroke="#fff" strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round" />
+              </Svg>
+              <Text style={s.actionBarBtnText}>削除</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      )}
+
+      {/* タグ選択シート */}
+      <BottomSheet visible={tagSheetOpen} onClose={() => setTagSheetOpen(false)} sheetStyle={ts.sheet}>
+        <Text style={ts.heading}>タグを選択</Text>
+        <Text style={ts.sub}>{selectedIds.size}冊にまとめて追加します</Text>
+        {tags.length === 0 ? (
+          <Text style={ts.empty}>タグがまだありません</Text>
+        ) : (
+          <View style={ts.tagList}>
+            {tags.map((tag) => (
+              <TouchableOpacity key={tag.id} style={ts.tagRow} onPress={() => handleBulkTag(tag.id)} activeOpacity={0.7}>
+                <Text style={ts.tagName}>{tag.name}</Text>
+                <Svg width="16" height="16" viewBox="0 0 16 16" fill="none">
+                  <Path d="M6 4l4 4-4 4" stroke={C.muted2} strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round" />
+                </Svg>
+              </TouchableOpacity>
+            ))}
+          </View>
+        )}
+      </BottomSheet>
 
       {deletedBook && (
         <UndoToast
@@ -280,8 +407,12 @@ function UndoToast({
 }
 
 function BooksGrid({
-  books, cardW, onPress,
-}: { books: Book[]; cardW: number; onPress: (id: string) => void }) {
+  books, cardW, onPress, onLongPress, selectionMode, selectedIds,
+}: {
+  books: Book[]; cardW: number;
+  onPress: (id: string) => void; onLongPress: (id: string) => void;
+  selectionMode: boolean; selectedIds: Set<string>;
+}) {
   const rows: Book[][] = [];
   for (let i = 0; i < books.length; i += 3) rows.push(books.slice(i, i + 3));
   return (
@@ -289,7 +420,13 @@ function BooksGrid({
       {rows.map((row, ri) => (
         <View key={ri} style={[s.row, { gap: CARD_GAP }]}>
           {row.map((b) => (
-            <BookCard key={b.id} book={b} cardW={cardW} onPress={() => onPress(b.id)} />
+            <BookCard
+              key={b.id} book={b} cardW={cardW}
+              onPress={() => onPress(b.id)}
+              onLongPress={() => onLongPress(b.id)}
+              selectionMode={selectionMode}
+              selected={selectedIds.has(b.id)}
+            />
           ))}
           {row.length < 3 && Array(3 - row.length).fill(null).map((_, i) => (
             <View key={i} style={{ width: cardW }} />
@@ -301,8 +438,11 @@ function BooksGrid({
 }
 
 function BookCard({
-  book, cardW, onPress,
-}: { book: Book; cardW: number; onPress: () => void }) {
+  book, cardW, onPress, onLongPress, selectionMode, selected,
+}: {
+  book: Book; cardW: number; onPress: () => void; onLongPress: () => void;
+  selectionMode: boolean; selected: boolean;
+}) {
   const showProgress = book.status === 'reading' || book.status === 'rereading';
   const pct = book.total_pages > 0
     ? Math.min(100, Math.round((book.current_page / book.total_pages) * 100)) : 0;
@@ -310,13 +450,52 @@ function BookCard({
   const bg = bookColor(book.title);
   const fontSize = Math.max(8, Math.round(cardW * 0.11));
 
+  // アニメーション
+  const itemScale    = useRef(new Animated.Value(1)).current;
+  const overlayOpacity = useRef(new Animated.Value(0)).current;
+  const circleOpacity  = useRef(new Animated.Value(0)).current;
+  const checkScale   = useRef(new Animated.Value(0)).current;
+
+  useEffect(() => {
+    Animated.parallel([
+      Animated.spring(itemScale, {
+        toValue: selected ? 0.93 : 1,
+        damping: 18, stiffness: 260, useNativeDriver: true,
+      }),
+      Animated.timing(overlayOpacity, {
+        toValue: selected ? 0.3 : 0,
+        duration: 180, useNativeDriver: true,
+      }),
+    ]).start();
+  }, [selected]);
+
+  useEffect(() => {
+    Animated.timing(circleOpacity, {
+      toValue: selectionMode ? 1 : 0,
+      duration: 180, useNativeDriver: true,
+    }).start();
+  }, [selectionMode]);
+
+  useEffect(() => {
+    Animated.spring(checkScale, {
+      toValue: selected ? 1 : 0,
+      damping: 14, stiffness: 300, useNativeDriver: true,
+    }).start();
+  }, [selected]);
+
   return (
     <TouchableOpacity
       style={{ width: cardW, marginBottom: CARD_GAP }}
       onPress={onPress}
-      activeOpacity={0.7}
+      onLongPress={onLongPress}
+      activeOpacity={selectionMode ? 1 : 0.7}
+      delayLongPress={380}
     >
-      <View style={[s.cover, { width: cardW, height: coverH }]}>
+      <Animated.View style={[
+        s.cover, { width: cardW, height: coverH },
+        { transform: [{ scale: itemScale }] },
+        selected && s.coverSelected,
+      ]}>
         {book.cover_url
           ? <Image source={{ uri: book.cover_url }} style={s.coverImg} resizeMode="cover" />
           : (
@@ -327,7 +506,33 @@ function BookCard({
               </Text>
             </View>
           )}
-      </View>
+
+        {/* 選択時の暗オーバーレイ */}
+        <Animated.View
+          pointerEvents="none"
+          style={[StyleSheet.absoluteFill, s.selOverlay, { opacity: overlayOpacity }]}
+        />
+
+        {/* チェックサークル（右上） */}
+        <Animated.View
+          pointerEvents="none"
+          style={[s.circleWrap, { opacity: circleOpacity }]}
+        >
+          {/* 空サークル（選択モード中常時表示） */}
+          <View style={s.circleEmpty} />
+          {/* 塗りサークル＋チェック（選択時） */}
+          <Animated.View style={[
+            StyleSheet.absoluteFill, s.circleFilled,
+            { transform: [{ scale: checkScale }] },
+          ]}>
+            <Svg width="11" height="11" viewBox="0 0 11 11" fill="none">
+              <Path d="M2 5.5l2.8 2.8L9 3" stroke={C.paper} strokeWidth="1.8"
+                strokeLinecap="round" strokeLinejoin="round" />
+            </Svg>
+          </Animated.View>
+        </Animated.View>
+      </Animated.View>
+
       {showProgress && book.total_pages > 0 && (
         <View style={{ marginTop: 6 }}>
           <View style={s.progBg}>
@@ -410,6 +615,44 @@ const s = StyleSheet.create({
   progPct: { fontFamily: F.cormorant, fontSize: 14, color: C.ink2 },
   progPctUnit: { fontFamily: F.zen, fontSize: 9, color: C.muted2 },
   progPage: { fontFamily: F.cormorant, fontSize: 12, color: C.muted },
+  // 選択関連
+  coverSelected: {
+    shadowOpacity: 0.32, shadowRadius: 8, elevation: 8,
+  },
+  selOverlay: {
+    backgroundColor: C.ink, borderRadius: 1,
+  },
+  circleWrap: {
+    position: 'absolute', top: 6, right: 6,
+    width: 22, height: 22,
+  },
+  circleEmpty: {
+    width: 22, height: 22, borderRadius: 11,
+    borderWidth: 1.8, borderColor: 'rgba(255,255,255,0.85)',
+    backgroundColor: 'rgba(0,0,0,0.18)',
+  },
+  circleFilled: {
+    width: 22, height: 22, borderRadius: 11,
+    backgroundColor: C.ink,
+    alignItems: 'center', justifyContent: 'center',
+  },
+  // アクションバー
+  actionBar: {
+    backgroundColor: C.ink,
+    flexDirection: 'row', alignItems: 'center',
+    paddingHorizontal: 16, paddingVertical: 12, gap: 8,
+  },
+  actionBarCancel: { paddingHorizontal: 4 },
+  actionBarCancelText: { fontFamily: F.zen, fontSize: 11, color: 'rgba(255,255,255,0.5)', letterSpacing: 0.5 },
+  actionBarCount: { fontFamily: F.zen, fontSize: 11, color: 'rgba(255,255,255,0.7)', flex: 1, textAlign: 'center' },
+  actionBarButtons: { flexDirection: 'row', gap: 8 },
+  actionBarBtn: {
+    flexDirection: 'row', alignItems: 'center', gap: 5,
+    paddingHorizontal: 12, paddingVertical: 7,
+    borderRadius: 2, borderWidth: 1, borderColor: 'rgba(255,255,255,0.2)',
+  },
+  actionBarBtnDanger: { borderColor: 'rgba(199,123,111,0.5)' },
+  actionBarBtnText: { fontFamily: F.zen, fontSize: 11, color: C.paper, letterSpacing: 0.5 },
   undoToast: {
     position: 'absolute', left: 20, right: 20,
     backgroundColor: C.ink, borderRadius: 2,
@@ -423,4 +666,20 @@ const s = StyleSheet.create({
     fontFamily: F.zen, fontSize: 11, letterSpacing: 1.8, color: C.paper,
     borderBottomWidth: 1, borderBottomColor: C.paper, paddingBottom: 1,
   },
+});
+
+const ts = StyleSheet.create({
+  sheet: {
+    backgroundColor: C.paper, borderTopLeftRadius: 20, borderTopRightRadius: 20,
+    padding: 28, paddingBottom: 48,
+  },
+  heading: { fontFamily: F.shippori, fontSize: 20, color: C.ink, marginBottom: 6 },
+  sub: { fontFamily: F.zen, fontSize: 11, color: C.muted, marginBottom: 20 },
+  empty: { fontFamily: F.zen, fontSize: 13, color: C.muted2, textAlign: 'center', paddingVertical: 20 },
+  tagList: { gap: 0 },
+  tagRow: {
+    flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
+    paddingVertical: 16, borderBottomWidth: 1, borderBottomColor: C.line,
+  },
+  tagName: { fontFamily: F.zen, fontSize: 14, color: C.ink },
 });
