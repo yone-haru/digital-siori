@@ -29,11 +29,11 @@ export type ReadingSession = {
   end_page: number;
 };
 
-export type SessionMemo = {
+export type BookMemo = {
   id: string;
-  session_id: string;
   page_number: number;
   content: string;
+  created_at: string;
 };
 
 export type Tag = {

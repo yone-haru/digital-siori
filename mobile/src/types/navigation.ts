@@ -8,6 +8,8 @@ export type RootStackParamList = {
     bookAuthor: string;
     startPage: number;
     totalPages: number;
+    /** クラッシュ復元時のみ。経過時間をこの時刻から再計算する */
+    resumeStartedAt?: string;
   };
   Account: undefined;
   ResetPassword: undefined;

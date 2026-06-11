@@ -33,12 +33,6 @@ export function bookColor(title: string): string {
   return BOOK_COLORS[h % BOOK_COLORS.length];
 }
 
-export function toJSTDate(isoString: string): string {
-  return new Date(new Date(isoString).getTime() + 9 * 3600 * 1000)
-    .toISOString()
-    .slice(0, 10);
-}
-
 export function makeDayLabel(dateStr: string, todayStr: string): string {
   if (dateStr === todayStr) return '今日';
   const prev = new Date(todayStr + 'T00:00:00Z');

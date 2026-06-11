@@ -23,6 +23,7 @@ import Svg, { Rect, Circle, Path } from 'react-native-svg';
 
 import { AuthProvider, useAuth } from './src/contexts/AuthContext';
 import { SubscriptionProvider, useSubscription } from './src/contexts/SubscriptionContext';
+import { ToastProvider } from './src/lib/toast';
 import { ProPaywallSheet } from './src/components/ProPaywallSheet';
 import { supabase } from './src/lib/supabase';
 import { C, F } from './src/lib/colors';
@@ -190,11 +191,13 @@ export default function App() {
     <SafeAreaProvider>
       <AuthProvider>
         <SubscriptionProvider>
-          <NavigationContainer>
-            <RootNavigator />
-          </NavigationContainer>
-          <GlobalPaywallSheet />
-          <StatusBar style="dark" />
+          <ToastProvider>
+            <NavigationContainer>
+              <RootNavigator />
+            </NavigationContainer>
+            <GlobalPaywallSheet />
+            <StatusBar style="dark" />
+          </ToastProvider>
         </SubscriptionProvider>
       </AuthProvider>
     </SafeAreaProvider>

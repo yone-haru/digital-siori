@@ -1,8 +1,9 @@
 import React, { useRef, useState } from 'react';
-import { View, Text, PanResponder } from 'react-native';
+import { View, Text, TextInput, PanResponder } from 'react-native';
 import Svg, { Path } from 'react-native-svg';
 
 const PX_PER_STEP = 8;
+const TAP_THRESHOLD = 5;
 
 function digitFineRatio(value: number, fineRatio: number, digitPos: number): number {
   if (digitPos === 0) return fineRatio;
@@ -46,16 +47,28 @@ export function DialInput({
   const valueRef = useRef(value); valueRef.current = value;
   const minRef = useRef(min); minRef.current = min;
   const maxRef = useRef(max); maxRef.current = max;
+  const disabledRef = useRef(disabled); disabledRef.current = disabled;
   const onChangeRef = useRef(onChange); onChangeRef.current = onChange;
   const onCommitRef = useRef(onCommit); onCommitRef.current = onCommit;
 
   const [isDragging, setIsDragging] = useState(false);
   const [fineRatio, setFineRatio] = useState(0);
+  const [editing, setEditing] = useState(false);
+  const [editText, setEditText] = useState('');
+
+  function commitEdit(text: string) {
+    setEditing(false);
+    const parsed = parseInt(text, 10);
+    if (Number.isNaN(parsed)) return;
+    const clamped = Math.max(minRef.current, Math.min(maxRef.current, parsed));
+    onChangeRef.current(clamped);
+    onCommitRef.current?.(clamped);
+  }
 
   const pan = useRef(
     PanResponder.create({
-      onStartShouldSetPanResponder: () => true,
-      onMoveShouldSetPanResponder: () => true,
+      onStartShouldSetPanResponder: () => !disabledRef.current,
+      onMoveShouldSetPanResponder: () => !disabledRef.current,
       onShouldBlockNativeResponder: () => true,
       onPanResponderTerminationRequest: () => false,
       onPanResponderGrant: (e) => {
@@ -76,9 +89,15 @@ export function DialInput({
         onChangeRef.current(next);
         setFineRatio(fine / PX_PER_STEP);
       },
-      onPanResponderRelease: () => {
+      onPanResponderRelease: (_, g) => {
         setIsDragging(false);
         setFineRatio(0);
+        // ほぼ動いていなければタップ → キーボード入力モード
+        if (Math.abs(g.dx) < TAP_THRESHOLD && Math.abs(g.dy) < TAP_THRESHOLD) {
+          setEditText(String(valueRef.current));
+          setEditing(true);
+          return;
+        }
         onCommitRef.current?.(latestValue.current);
       },
       onPanResponderTerminate: () => {
@@ -92,6 +111,28 @@ export function DialInput({
   const baseDigits = value <= 0 ? 1 : Math.floor(Math.log10(value)) + 1;
   const numDigits = isDragging ? Math.max(baseDigits, lockedDigits.current) : baseDigits;
   const digitW = Math.round(fontSize * 0.6);
+
+  if (editing) {
+    return (
+      <View style={{ height: slotHeight, flexDirection: 'row', alignItems: 'center' }}>
+        <TextInput
+          style={{
+            fontFamily, fontSize, color,
+            minWidth: digitW * Math.max(numDigits, 2) + 8,
+            padding: 0, textAlign: 'center',
+          }}
+          value={editText}
+          onChangeText={(t) => setEditText(t.replace(/[^0-9]/g, ''))}
+          keyboardType="number-pad"
+          autoFocus
+          selectTextOnFocus
+          maxLength={String(max).length}
+          onSubmitEditing={() => commitEdit(editText)}
+          onBlur={() => commitEdit(editText)}
+        />
+      </View>
+    );
+  }
 
   return (
     <View

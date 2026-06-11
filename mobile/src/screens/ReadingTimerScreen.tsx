@@ -1,18 +1,22 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import {
   View, Text, TouchableOpacity, StyleSheet, TextInput,
-  ScrollView, AppState,
+  ScrollView, AppState, BackHandler,
 } from 'react-native';
 import { DialInput } from '../components/DialInput';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import type { RouteProp } from '@react-navigation/native';
-import Svg, { Path, Circle } from 'react-native-svg';
+import Svg, { Path } from 'react-native-svg';
+import { useKeepAwake } from 'expo-keep-awake';
 import { supabase } from '../lib/supabase';
 import { useAuth } from '../contexts/AuthContext';
+import { useToast } from '../lib/toast';
 import { F } from '../lib/colors';
-import { formatDuration } from '../lib/utils';
+import { recordSession } from '../data/books';
+import { saveActiveSession, clearActiveSession } from '../lib/activeSession';
 import { BottomSheet } from '../components/BottomSheet';
+import type { BookMemo } from '../types';
 import type { RootStackParamList } from '../types/navigation';
 
 type Props = {
@@ -21,16 +25,21 @@ type Props = {
 };
 
 type Phase = 'running' | 'confirm' | 'saving' | 'saved';
-type BookMemo = { id: string; page_number: number; content: string; created_at: string };
 
 const BRIGHT = 'rgba(255,255,255,0.92)';
 const DIM = 'rgba(255,255,255,0.55)';
 
 export default function ReadingTimerScreen({ navigation, route }: Props) {
-  const { bookId, bookTitle, bookAuthor, startPage, totalPages } = route.params;
+  const { bookId, bookTitle, bookAuthor, startPage, totalPages, resumeStartedAt } = route.params;
   const { user } = useAuth();
+  const { showToast } = useToast();
+  useKeepAwake();
 
-  const [elapsed, setElapsed] = useState(0);
+  const initialElapsed = resumeStartedAt
+    ? Math.max(0, Math.floor((Date.now() - new Date(resumeStartedAt).getTime()) / 1000))
+    : 0;
+
+  const [elapsed, setElapsed] = useState(initialElapsed);
   const [isRunning, setIsRunning] = useState(true);
   const [isPaused, setIsPaused] = useState(false);
   const [currentPage, setCurrentPage] = useState(startPage);
@@ -38,6 +47,8 @@ export default function ReadingTimerScreen({ navigation, route }: Props) {
   const [error, setError] = useState<string | null>(null);
   const [savedDuration, setSavedDuration] = useState(0);
   const [savedPages, setSavedPages] = useState(0);
+  const [savedFinished, setSavedFinished] = useState(false);
+  const [exitSheetOpen, setExitSheetOpen] = useState(false);
 
   const [memoOpen, setMemoOpen] = useState(false);
   const [memoPage, setMemoPage] = useState(startPage);
@@ -47,11 +58,21 @@ export default function ReadingTimerScreen({ navigation, route }: Props) {
   const [editingMemoId, setEditingMemoId] = useState<string | null>(null);
   const [deletingMemo, setDeletingMemo] = useState<BookMemo | null>(null);
 
-  const mountTime = useRef(Date.now());
-  const startedAt = useRef(new Date().toISOString());
+  const mountTime = useRef(Date.now() - initialElapsed * 1000);
+  const startedAt = useRef(resumeStartedAt ?? new Date().toISOString());
   const frozenElapsed = useRef(0);
   const pauseAccum = useRef(0);
   const isRunningRef = useRef(true);
+  const elapsedRef = useRef(initialElapsed);
+  elapsedRef.current = elapsed;
+
+  // アプリが強制終了してもセッションを復元できるようスナップショットを残す
+  useEffect(() => {
+    saveActiveSession({
+      bookId, bookTitle, bookAuthor, startPage, totalPages,
+      startedAt: startedAt.current,
+    });
+  }, [bookId, bookTitle, bookAuthor, startPage, totalPages]);
 
   useEffect(() => {
     supabase
@@ -106,79 +127,103 @@ export default function ReadingTimerScreen({ navigation, route }: Props) {
     setPhase('saving');
 
     const endPage = currentPage;
-    const endedAt = new Date().toISOString();
     const durationSeconds = frozenElapsed.current;
 
-    const { error: sessionErr } = await supabase
-      .from('reading_sessions')
-      .insert({
-        book_id: bookId,
-        user_id: user.id,
-        started_at: startedAt.current,
-        ended_at: endedAt,
-        duration_seconds: durationSeconds,
-        start_page: startPage,
-        end_page: endPage,
-      });
+    const result = await recordSession({
+      bookId,
+      userId: user.id,
+      startedAt: startedAt.current,
+      endedAt: new Date().toISOString(),
+      startPage,
+      endPage,
+      durationSeconds,
+    });
 
-    if (sessionErr) {
-      setError(`保存に失敗しました: ${sessionErr.message}`);
+    if (!result.ok) {
+      setError(result.message);
       setPhase('confirm');
       return;
     }
 
-    const isNowFinished = totalPages > 0 && endPage >= totalPages;
-    if (isNowFinished) {
-      const { data: bd } = await supabase
-        .from('books').select('read_count').eq('id', bookId).single();
-      await supabase.from('books').update({
-        status: 'finished',
-        finished_at: new Date().toISOString(),
-        read_count: (bd?.read_count ?? 0) + 1,
-        current_page: endPage,
-      }).eq('id', bookId);
-    } else {
-      const newPage = Math.max(startPage, endPage);
-      await supabase
-        .from('books')
-        .update({ current_page: newPage })
-        .eq('id', bookId)
-        .lt('current_page', newPage);
-    }
-
+    await clearActiveSession();
     setSavedDuration(durationSeconds);
     setSavedPages(Math.max(0, endPage - startPage));
+    setSavedFinished(result.data.finished);
     setPhase('saved');
   }, [bookId, currentPage, startPage, user]);
+
+  // 1分以上計測している場合は誤タップでセッションが消えないよう確認を挟む
+  function handleClose() {
+    if (phase === 'saving') return;
+    if ((phase === 'running' || phase === 'confirm') && elapsedRef.current >= 60) {
+      setExitSheetOpen(true);
+      return;
+    }
+    discardAndExit();
+  }
+
+  function discardAndExit() {
+    setExitSheetOpen(false);
+    clearActiveSession();
+    navigation.goBack();
+  }
+
+  // Android のハードウェア戻るボタンも確認ダイアログを通す
+  const handleCloseRef = useRef(handleClose);
+  handleCloseRef.current = handleClose;
+  useEffect(() => {
+    const sub = BackHandler.addEventListener('hardwareBackPress', () => {
+      handleCloseRef.current();
+      return true;
+    });
+    return () => sub.remove();
+  }, []);
 
   async function handleSaveMemo() {
     if (!memoText.trim() || !user) return;
     setSavingMemo(true);
     if (editingMemoId) {
-      await supabase.from('book_memos')
+      const { error: e } = await supabase.from('book_memos')
         .update({ page_number: memoPage, content: memoText.trim() })
         .eq('id', editingMemoId);
-      setBookMemos((prev) => prev.map((m) =>
-        m.id === editingMemoId ? { ...m, page_number: memoPage, content: memoText.trim() } : m
-      ));
-      setEditingMemoId(null);
+      if (e) {
+        showToast('メモの更新に失敗しました', 'error');
+      } else {
+        setBookMemos((prev) => prev.map((m) =>
+          m.id === editingMemoId ? { ...m, page_number: memoPage, content: memoText.trim() } : m
+        ));
+        setEditingMemoId(null);
+        setMemoText('');
+      }
     } else {
-      const { data } = await supabase
+      const { data, error: e } = await supabase
         .from('book_memos')
         .insert({ book_id: bookId, user_id: user.id, page_number: memoPage, content: memoText.trim() })
         .select('id,page_number,content,created_at')
         .single();
-      if (data) setBookMemos((prev) => [...prev, data as BookMemo]);
+      if (e || !data) {
+        showToast('メモの保存に失敗しました', 'error');
+      } else {
+        setBookMemos((prev) => [...prev, data as BookMemo]);
+        setMemoText('');
+      }
     }
-    setMemoText('');
     setSavingMemo(false);
   }
 
   async function confirmDeleteMemo() {
     if (!deletingMemo) return;
-    setBookMemos((prev) => prev.filter((m) => m.id !== deletingMemo.id));
-    await supabase.from('book_memos').delete().eq('id', deletingMemo.id);
+    const target = deletingMemo;
+    setBookMemos((prev) => prev.filter((m) => m.id !== target.id));
     setDeletingMemo(null);
+    const { error: e } = await supabase.from('book_memos').delete().eq('id', target.id);
+    if (e) {
+      // 失敗時はリストに戻す
+      setBookMemos((prev) => [...prev, target].sort(
+        (a, b) => a.created_at.localeCompare(b.created_at),
+      ));
+      showToast('メモの削除に失敗しました', 'error');
+    }
   }
 
   function startEditMemo(memo: BookMemo) {
@@ -195,7 +240,7 @@ export default function ReadingTimerScreen({ navigation, route }: Props) {
       <SafeAreaView style={{ flex: 1 }} edges={['top', 'bottom']}>
         {/* Top bar */}
         <View style={s.topBar}>
-          <TouchableOpacity onPress={() => navigation.goBack()} hitSlop={8}>
+          <TouchableOpacity onPress={handleClose} hitSlop={8}>
             <Svg width="22" height="22" viewBox="0 0 22 22" fill="none">
               <Path d="M6 6l10 10M16 6L6 16" stroke="rgba(255,255,255,0.6)" strokeWidth="1.4" strokeLinecap="round" />
             </Svg>
@@ -393,11 +438,30 @@ export default function ReadingTimerScreen({ navigation, route }: Props) {
           </View>
       </BottomSheet>
 
+      {/* Exit confirmation sheet */}
+      <BottomSheet visible={exitSheetOpen} onClose={() => setExitSheetOpen(false)} sheetStyle={s.memoSheet}>
+        <Text style={s.memoDeleteHeading}>記録せずに終了しますか？</Text>
+        <Text style={s.exitSheetBody}>
+          {Math.floor(elapsed / 60)}分{elapsed % 60}秒の読書が記録されません。
+        </Text>
+        <View style={[s.memoBtns, { padding: 28, paddingTop: 0 }]}>
+          <TouchableOpacity style={s.memoCancelBtn} onPress={() => setExitSheetOpen(false)}>
+            <Text style={s.memoCancelText}>読書に戻る</Text>
+          </TouchableOpacity>
+          <TouchableOpacity style={s.memoDeleteBtn} onPress={discardAndExit}>
+            <Text style={s.memoDeleteBtnText}>記録せずに終了</Text>
+          </TouchableOpacity>
+        </View>
+      </BottomSheet>
+
       {/* Session saved modal */}
       {phase === 'saved' && (
         <View style={s.savedOverlay}>
           <View style={s.savedCard}>
-            <Text style={s.savedLabel}>SESSION SAVED</Text>
+            <Text style={s.savedLabel}>{savedFinished ? 'BOOK FINISHED' : 'SESSION SAVED'}</Text>
+            {savedFinished && (
+              <Text style={s.finishedMessage}>読了おめでとうございます</Text>
+            )}
             <View style={s.savedDivider} />
             <View style={s.savedStats}>
               <View style={s.savedRow}>
@@ -571,6 +635,14 @@ const s = StyleSheet.create({
     borderRadius: 2, paddingHorizontal: 28, paddingVertical: 32,
   },
   savedLabel: { fontFamily: F.zen, fontSize: 10, letterSpacing: 2.8, color: '#6E6B65', textTransform: 'uppercase', textAlign: 'center', marginBottom: 20 },
+  finishedMessage: {
+    fontFamily: F.shippori, fontSize: 18, color: '#0A0A0A',
+    textAlign: 'center', marginTop: -8, marginBottom: 20,
+  },
+  exitSheetBody: {
+    fontFamily: F.zen, fontSize: 12, color: '#6E6B65', lineHeight: 20,
+    paddingHorizontal: 28, marginBottom: 24,
+  },
   savedDivider: { height: 1, backgroundColor: '#E3DFD6', marginBottom: 20 },
   savedStats: { marginBottom: 20 },
   savedRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'baseline', marginBottom: 12 },

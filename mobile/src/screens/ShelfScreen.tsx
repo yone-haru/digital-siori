@@ -9,10 +9,13 @@ import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import Svg, { Path, Circle } from 'react-native-svg';
 import { supabase } from '../lib/supabase';
 import { useAuth } from '../contexts/AuthContext';
+import { useToast } from '../lib/toast';
 import { C, F } from '../lib/colors';
 import { bookColor } from '../lib/utils';
 import { pendingDelete } from '../lib/pendingDelete';
+import { getActiveSession, clearActiveSession, type ActiveSession } from '../lib/activeSession';
 import { BottomSheet } from '../components/BottomSheet';
+import { BookCover } from '../components/BookCover';
 import type { BookStatus } from '../types';
 import type { RootStackParamList } from '../types/navigation';
 
@@ -63,11 +66,14 @@ export default function ShelfScreen() {
   const [books, setBooks] = useState<Book[]>([]);
   const [tags, setTags] = useState<Tag[]>([]);
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
   const [filter, setFilter] = useState<FilterTab>('all');
   const [sortKey, setSortKey] = useState<SortKey>('updated_at');
   const [tagFilter, setTagFilter] = useState<string | null>(null);
   const [deletedBook, setDeletedBook] = useState<{ bookId: string; bookTitle: string } | null>(null);
+  const [recoverSession, setRecoverSession] = useState<ActiveSession | null>(null);
+  const { showToast } = useToast();
 
   // 選択モード
   const [selectionMode, setSelectionMode] = useState(false);
@@ -76,24 +82,32 @@ export default function ShelfScreen() {
 
   const fetchData = useCallback(async () => {
     if (!user) return;
-    const [{ data: bData }, { data: btRows }, { data: tagRows }] = await Promise.all([
+    const [bRes, btRes, tagRes] = await Promise.all([
       supabase.from('books')
         .select('id,title,author,cover_url,current_page,total_pages,status,created_at,updated_at,rating')
         .order('updated_at', { ascending: false }),
       supabase.from('book_tags').select('book_id,tag_id'),
       supabase.from('tags').select('id,name').eq('user_id', user.id).order('created_at'),
     ]);
+    if (bRes.error || btRes.error || tagRes.error) {
+      // 失敗時は前回のデータを保持し、空状態と区別する
+      setLoadError(true);
+      return;
+    }
+    setLoadError(false);
     const tagMap: Record<string, string[]> = {};
-    for (const r of btRows ?? []) {
+    for (const r of btRes.data ?? []) {
       tagMap[r.book_id] = [...(tagMap[r.book_id] ?? []), r.tag_id];
     }
-    setBooks((bData ?? []).map((b) => ({ ...b, tagIds: tagMap[b.id] ?? [] })));
-    setTags(tagRows ?? []);
+    setBooks((bRes.data ?? []).map((b) => ({ ...b, tagIds: tagMap[b.id] ?? [] })));
+    setTags(tagRes.data ?? []);
   }, [user]);
 
   useFocusEffect(useCallback(() => {
     const pending = pendingDelete.get();
     setDeletedBook(pending);
+    // 強制終了などで残った読書セッションがあれば復元を提案する
+    getActiveSession().then(setRecoverSession);
     fetchData().finally(() => setLoading(false));
   }, [fetchData]));
 
@@ -113,6 +127,12 @@ export default function ShelfScreen() {
     for (const b of visibleBooks) c[b.status] = (c[b.status] ?? 0) + 1;
     return c;
   }, [visibleBooks]);
+
+  // 直近に読んでいた本（fetch が updated_at 降順なので先頭一致でよい）
+  const continueBook = useMemo(
+    () => visibleBooks.find((b) => b.status === 'reading' || b.status === 'rereading') ?? null,
+    [visibleBooks],
+  );
 
   const sorted = useMemo(() => {
     let base = filter === 'all' ? visibleBooks : visibleBooks.filter((b) => b.status === filter);
@@ -166,7 +186,11 @@ export default function ShelfScreen() {
           text: '削除', style: 'destructive',
           onPress: async () => {
             const ids = Array.from(selectedIds);
-            await supabase.from('books').delete().in('id', ids);
+            const { error } = await supabase.from('books').delete().in('id', ids);
+            if (error) {
+              showToast('削除に失敗しました。通信環境を確認してください', 'error');
+              return;
+            }
             setBooks((prev) => prev.filter((b) => !selectedIds.has(b.id)));
             exitSelectionMode();
           },
@@ -178,7 +202,11 @@ export default function ShelfScreen() {
   async function handleBulkTag(tagId: string) {
     const ids = Array.from(selectedIds);
     const rows = ids.map((bookId) => ({ book_id: bookId, tag_id: tagId, user_id: user!.id }));
-    await supabase.from('book_tags').upsert(rows, { onConflict: 'book_id,tag_id' });
+    const { error } = await supabase.from('book_tags').upsert(rows, { onConflict: 'book_id,tag_id' });
+    if (error) {
+      showToast('タグ付けに失敗しました', 'error');
+      return;
+    }
     setBooks((prev) => prev.map((b) =>
       selectedIds.has(b.id) && !b.tagIds.includes(tagId)
         ? { ...b, tagIds: [...b.tagIds, tagId] }
@@ -186,7 +214,19 @@ export default function ShelfScreen() {
     ));
     setTagSheetOpen(false);
     exitSelectionMode();
+    showToast(`${ids.length}冊にタグを追加しました`);
   }
+
+  const handleCardPress = useCallback((id: string) => {
+    if (selectionMode) toggleSelection(id);
+    else nav.navigate('BookDetail', { bookId: id });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectionMode, nav]);
+
+  const handleCardLongPress = useCallback((id: string) => {
+    if (!selectionMode) enterSelectionMode(id);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectionMode]);
 
   if (loading) {
     return (
@@ -222,6 +262,33 @@ export default function ShelfScreen() {
         showsVerticalScrollIndicator={false}
         style={{ flex: 1 }}
       >
+        {/* 続きから再開（最重要動作を1タップに） */}
+        {continueBook && !selectionMode && (
+          <TouchableOpacity
+            style={s.continueCard}
+            activeOpacity={0.85}
+            onPress={() => nav.navigate('ReadingTimer', {
+              bookId: continueBook.id,
+              bookTitle: continueBook.title,
+              bookAuthor: continueBook.author,
+              startPage: continueBook.current_page,
+              totalPages: continueBook.total_pages,
+            })}
+          >
+            <BookCover title={continueBook.title} coverUrl={continueBook.cover_url} width={40} height={58} />
+            <View style={{ flex: 1 }}>
+              <Text style={s.continueLabel}>Continue Reading</Text>
+              <Text style={s.continueTitle} numberOfLines={1}>{continueBook.title}</Text>
+              <Text style={s.continuePage}>p.{continueBook.current_page} から再開</Text>
+            </View>
+            <View style={s.continuePlay}>
+              <Svg width="12" height="12" viewBox="0 0 12 12" fill="none">
+                <Path d="M3 2l7 4-7 4V2z" fill={C.paper} />
+              </Svg>
+            </View>
+          </TouchableOpacity>
+        )}
+
         {/* Filter tabs */}
         <ScrollView horizontal showsHorizontalScrollIndicator={false}
           style={{ paddingTop: 16 }} contentContainerStyle={{ paddingHorizontal: H_PAD, gap: CARD_GAP }}>
@@ -263,7 +330,7 @@ export default function ShelfScreen() {
         {/* Sort */}
         <View style={s.sortRow}>
           {SORTS.map((opt) => (
-            <TouchableOpacity key={opt.key} onPress={() => setSortKey(opt.key)}>
+            <TouchableOpacity key={opt.key} onPress={() => setSortKey(opt.key)} hitSlop={10}>
               <Text style={[s.sortOpt, sortKey === opt.key && s.sortOptActive]}>{opt.label}</Text>
             </TouchableOpacity>
           ))}
@@ -271,10 +338,17 @@ export default function ShelfScreen() {
 
         {/* Books */}
         {visibleBooks.length === 0 ? (
-          <View style={s.empty}>
-            <Text style={s.emptyTitle}>本棚はまだ空です</Text>
-            <Text style={s.emptySub}>下の + ボタンから本を追加してください</Text>
-          </View>
+          loadError ? (
+            <View style={s.empty}>
+              <Text style={s.emptyTitle}>読み込みに失敗しました</Text>
+              <Text style={s.emptySub}>通信環境を確認して、下に引っ張って再読み込みしてください</Text>
+            </View>
+          ) : (
+            <View style={s.empty}>
+              <Text style={s.emptyTitle}>本棚はまだ空です</Text>
+              <Text style={s.emptySub}>下の + ボタンから本を追加してください</Text>
+            </View>
+          )
         ) : filter === 'all' ? (
           SECTIONS.map(({ status, label }) => {
             const group = sorted.filter((b) => b.status === status);
@@ -290,8 +364,8 @@ export default function ShelfScreen() {
                   cardW={cardW}
                   selectionMode={selectionMode}
                   selectedIds={selectedIds}
-                  onPress={(id) => selectionMode ? toggleSelection(id) : nav.navigate('BookDetail', { bookId: id })}
-                  onLongPress={(id) => !selectionMode && enterSelectionMode(id)}
+                  onPress={handleCardPress}
+                  onLongPress={handleCardLongPress}
                 />
               </View>
             );
@@ -303,8 +377,8 @@ export default function ShelfScreen() {
               cardW={cardW}
               selectionMode={selectionMode}
               selectedIds={selectedIds}
-              onPress={(id) => selectionMode ? toggleSelection(id) : nav.navigate('BookDetail', { bookId: id })}
-              onLongPress={(id) => !selectionMode && enterSelectionMode(id)}
+              onPress={handleCardPress}
+              onLongPress={handleCardLongPress}
             />
           </View>
         )}
@@ -370,9 +444,13 @@ export default function ShelfScreen() {
           title={deletedBook.bookTitle}
           bottom={49 + insets.bottom + 12}
           onTimeout={async () => {
-            await supabase.from('books').delete().eq('id', deletedBook.bookId);
+            const { error } = await supabase.from('books').delete().eq('id', deletedBook.bookId);
             pendingDelete.clear();
             setDeletedBook(null);
+            if (error) {
+              // 削除失敗時は本がリストに戻るので、その旨を伝える
+              showToast('削除に失敗したため、本を元に戻しました', 'error');
+            }
           }}
           onUndo={() => {
             pendingDelete.clear();
@@ -381,6 +459,50 @@ export default function ShelfScreen() {
           }}
         />
       )}
+
+      {/* 読書セッション復元シート（アプリ強制終了時の保険） */}
+      <BottomSheet
+        visible={!!recoverSession}
+        onClose={() => setRecoverSession(null)}
+        sheetStyle={ts.sheet}
+      >
+        {recoverSession && (
+          <>
+            <Text style={ts.heading}>前回の読書が記録されていません</Text>
+            <Text style={ts.sub}>
+              「{recoverSession.bookTitle}」の読書セッションが途中で終了しています。続きから再開しますか？
+            </Text>
+            <TouchableOpacity
+              style={rs.resumeBtn}
+              activeOpacity={0.8}
+              onPress={() => {
+                const session = recoverSession;
+                setRecoverSession(null);
+                nav.navigate('ReadingTimer', {
+                  bookId: session.bookId,
+                  bookTitle: session.bookTitle,
+                  bookAuthor: session.bookAuthor,
+                  startPage: session.startPage,
+                  totalPages: session.totalPages,
+                  resumeStartedAt: session.startedAt,
+                });
+              }}
+            >
+              <Text style={rs.resumeBtnText}>続きから再開する</Text>
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={rs.discardBtn}
+              activeOpacity={0.7}
+              onPress={() => {
+                clearActiveSession();
+                setRecoverSession(null);
+              }}
+            >
+              <Text style={rs.discardBtnText}>破棄する</Text>
+            </TouchableOpacity>
+          </>
+        )}
+      </BottomSheet>
     </SafeAreaView>
   );
 }
@@ -422,8 +544,8 @@ function BooksGrid({
           {row.map((b) => (
             <BookCard
               key={b.id} book={b} cardW={cardW}
-              onPress={() => onPress(b.id)}
-              onLongPress={() => onLongPress(b.id)}
+              onPress={onPress}
+              onLongPress={onLongPress}
               selectionMode={selectionMode}
               selected={selectedIds.has(b.id)}
             />
@@ -437,10 +559,12 @@ function BooksGrid({
   );
 }
 
-function BookCard({
+// 選択モードのトグルで全カードが再レンダーされないよう memo 化している
+const BookCard = React.memo(function BookCard({
   book, cardW, onPress, onLongPress, selectionMode, selected,
 }: {
-  book: Book; cardW: number; onPress: () => void; onLongPress: () => void;
+  book: Book; cardW: number;
+  onPress: (id: string) => void; onLongPress: (id: string) => void;
   selectionMode: boolean; selected: boolean;
 }) {
   const showProgress = book.status === 'reading' || book.status === 'rereading';
@@ -486,8 +610,8 @@ function BookCard({
   return (
     <TouchableOpacity
       style={{ width: cardW, marginBottom: CARD_GAP }}
-      onPress={onPress}
-      onLongPress={onLongPress}
+      onPress={() => onPress(book.id)}
+      onLongPress={() => onLongPress(book.id)}
       activeOpacity={selectionMode ? 1 : 0.7}
       delayLongPress={380}
     >
@@ -546,7 +670,7 @@ function BookCard({
       )}
     </TouchableOpacity>
   );
-}
+});
 
 const s = StyleSheet.create({
   container: { flex: 1, backgroundColor: C.paper },
@@ -565,6 +689,21 @@ const s = StyleSheet.create({
   },
   avatarImg: { width: 32, height: 32, borderRadius: 16 },
   avatarText: { fontFamily: F.cormorant, fontSize: 14, color: C.paper, fontWeight: '600' },
+  continueCard: {
+    flexDirection: 'row', alignItems: 'center', gap: 14,
+    marginHorizontal: H_PAD, marginTop: 16,
+    padding: 14, backgroundColor: C.line2, borderRadius: 2,
+  },
+  continueLabel: {
+    fontFamily: F.zen, fontSize: 9, letterSpacing: 2, color: C.muted,
+    textTransform: 'uppercase', marginBottom: 4,
+  },
+  continueTitle: { fontFamily: F.shippori, fontSize: 15, color: C.ink, marginBottom: 2 },
+  continuePage: { fontFamily: F.zen, fontSize: 11, color: C.muted },
+  continuePlay: {
+    width: 36, height: 36, borderRadius: 18, backgroundColor: C.ink,
+    alignItems: 'center', justifyContent: 'center',
+  },
   filterTab: {
     flexDirection: 'row', alignItems: 'center', gap: 6,
     paddingHorizontal: 12, paddingVertical: 6,
@@ -682,4 +821,17 @@ const ts = StyleSheet.create({
     paddingVertical: 16, borderBottomWidth: 1, borderBottomColor: C.line,
   },
   tagName: { fontFamily: F.zen, fontSize: 14, color: C.ink },
+});
+
+const rs = StyleSheet.create({
+  resumeBtn: {
+    height: 50, backgroundColor: C.ink, borderRadius: 2,
+    alignItems: 'center', justifyContent: 'center', marginBottom: 10,
+  },
+  resumeBtnText: { fontFamily: F.zen, fontSize: 13, letterSpacing: 1.5, color: C.paper },
+  discardBtn: {
+    height: 50, borderWidth: 1, borderColor: C.line, borderRadius: 2,
+    alignItems: 'center', justifyContent: 'center',
+  },
+  discardBtnText: { fontFamily: F.zen, fontSize: 13, letterSpacing: 1.5, color: C.muted },
 });

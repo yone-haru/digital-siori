@@ -9,11 +9,14 @@ import { CalendarPicker } from '../components/CalendarPicker';
 import { supabase } from '../lib/supabase';
 import { useAuth } from '../contexts/AuthContext';
 import { useSubscription } from '../contexts/SubscriptionContext';
+import { useToast } from '../lib/toast';
 import { C, F } from '../lib/colors';
 import {
-  formatDuration, splitDuration, toJSTDate,
+  formatDuration, splitDuration,
   makeDayLabel, calcStreak,
 } from '../lib/utils';
+import { todayStr, dateStrOf } from '../lib/date';
+import { FREE_LIMITS } from '../lib/limits';
 import { BookCover } from '../components/BookCover';
 
 type BookDayStat = {
@@ -35,6 +38,7 @@ const BAR_MAX_H = 48;
 export default function StatsScreen() {
   const { user } = useAuth();
   const { isPro, openPaywall } = useSubscription();
+  const { showToast } = useToast();
   const [tab, setTab] = useState<'today' | 'all'>('today');
   const [dayStats, setDayStats] = useState<DayStat[]>([]);
   const [overall, setOverall] = useState<OverallStats | null>(null);
@@ -43,21 +47,29 @@ export default function StatsScreen() {
 
   const fetchStats = useCallback(async () => {
     if (!user) return;
-    const todayStr = new Date(Date.now() + 9 * 3600 * 1000).toISOString().slice(0, 10);
+    const today = todayStr();
 
     let sessionsQuery = supabase.from('reading_sessions')
       .select('id,book_id,started_at,start_page,end_page,duration_seconds')
-      .eq('user_id' as never, user.id)
+      .eq('user_id', user.id)
       .order('started_at', { ascending: false });
     if (!isPro) {
       const cutoff = new Date();
-      cutoff.setMonth(cutoff.getMonth() - 3);
+      cutoff.setMonth(cutoff.getMonth() - FREE_LIMITS.statsMonths);
       sessionsQuery = sessionsQuery.gte('started_at', cutoff.toISOString());
     }
-    const [{ data: books }, { data: sessions }] = await Promise.all([
+    const [booksRes, sessionsRes, streakRes] = await Promise.all([
       supabase.from('books').select('id,title,author,cover_url,current_page,total_pages,status'),
       sessionsQuery,
+      // streak は無料プランの表示期間に関係なく全期間の日付で計算する（日付のみの軽量クエリ）
+      supabase.from('reading_sessions').select('started_at').eq('user_id', user.id),
     ]);
+    if (booksRes.error || sessionsRes.error) {
+      showToast('統計の読み込みに失敗しました', 'error');
+      return;
+    }
+    const books = booksRes.data;
+    const sessions = sessionsRes.data;
 
     const bookMap = new Map((books ?? []).map((b) => [b.id, b]));
 
@@ -65,7 +77,7 @@ export default function StatsScreen() {
     const byDate = new Map<string, Map<string, DayBookAgg>>();
 
     for (const s of sessions ?? []) {
-      const dateStr = toJSTDate(s.started_at);
+      const dateStr = dateStrOf(s.started_at);
       if (!byDate.has(dateStr)) byDate.set(dateStr, new Map());
       const byBook = byDate.get(dateStr)!;
       if (!byBook.has(s.book_id)) byBook.set(s.book_id, { dayPages: 0, dayMinutes: 0, daySessions: 0 });
@@ -75,7 +87,7 @@ export default function StatsScreen() {
       agg.daySessions += 1;
     }
 
-    if (!byDate.has(todayStr)) byDate.set(todayStr, new Map());
+    if (!byDate.has(today)) byDate.set(today, new Map());
 
     const dStats: DayStat[] = [...byDate.entries()]
       .sort(([a], [b]) => b.localeCompare(a))
@@ -89,25 +101,26 @@ export default function StatsScreen() {
         const totalMin = bookDayStats.reduce((s, b) => s + b.dayMinutes, 0);
         const totalPg = bookDayStats.reduce((s, b) => s + b.dayPages, 0);
         const totalSess = bookDayStats.reduce((s, b) => s + b.daySessions, 0);
-        return { date: dateStr, label: makeDayLabel(dateStr, todayStr), minutes: totalMin, pages: totalPg, sessions: totalSess, books: bookDayStats };
+        return { date: dateStr, label: makeDayLabel(dateStr, today), minutes: totalMin, pages: totalPg, sessions: totalSess, books: bookDayStats };
       });
 
     setDayStats(dStats);
 
-    const allDates = (sessions ?? []).map((s) => toJSTDate(s.started_at));
+    const allDates = (sessions ?? []).map((s) => dateStrOf(s.started_at));
     const uniqueDays = new Set(allDates).size;
     const totalSeconds = (sessions ?? []).reduce((s, r) => s + (r.duration_seconds ?? 0), 0);
     const { hours, minutes } = splitDuration(totalSeconds);
     const avgMin = uniqueDays > 0 ? Math.round(totalSeconds / 60 / uniqueDays) : 0;
     const totalPages = (sessions ?? []).reduce((s, r) => s + Math.max(0, (r.end_page ?? 0) - (r.start_page ?? 0)), 0);
+    const streakDates = (streakRes.data ?? []).map((r) => dateStrOf(r.started_at));
 
     setOverall({
       hours, minutes, avgMinPerDay: avgMin,
       finishedCount: (books ?? []).filter((b) => b.status === 'finished').length,
       readingCount: (books ?? []).filter((b) => b.status === 'reading').length,
-      totalPages, streak: calcStreak(allDates, todayStr),
+      totalPages, streak: calcStreak(streakDates, today),
     });
-  }, [user, isPro]);
+  }, [user, isPro, showToast]);
 
   useFocusEffect(useCallback(() => { fetchStats().finally(() => setLoading(false)); }, [fetchStats]));
 
@@ -166,7 +179,6 @@ export default function StatsScreen() {
 function TodayTab({ dayStats }: { dayStats: DayStat[] }) {
   const [selectedDate, setSelectedDate] = useState(dayStats[0]?.date ?? '');
   const dayIdx = dayStats.findIndex((d) => d.date === selectedDate);
-  const todayStr = new Date(Date.now() + 9 * 3600 * 1000).toISOString().slice(0, 10);
   const day: DayStat = dayIdx !== -1 ? dayStats[dayIdx] : {
     date: selectedDate, label: selectedDate, minutes: 0, pages: 0, sessions: 0, books: [],
   };
@@ -204,7 +216,7 @@ function TodayTab({ dayStats }: { dayStats: DayStat[] }) {
         <CalendarPicker
           value={selectedDate}
           onChange={setSelectedDate}
-          max={new Date(Date.now() + 9 * 3600 * 1000).toISOString().slice(0, 10)}
+          max={todayStr()}
           markedDates={dayStats.filter(d => d.sessions > 0).map(d => d.date)}
           trigger={
             <View style={t.dateCenter}>

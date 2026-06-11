@@ -4,6 +4,7 @@ import {
   useWindowDimensions,
 } from 'react-native';
 import { C, F } from '../lib/colors';
+import { todayStr } from '../lib/date';
 
 const WEEK_LABELS = ['M', 'T', 'W', 'T', 'F', 'S', 'S'];
 const MONTH_NAMES = [
@@ -21,18 +22,18 @@ interface Props {
 }
 
 export function CalendarPicker({ value, onChange, max, min, trigger, markedDates }: Props) {
-  const todayStr = new Date(Date.now() + 9 * 3600 * 1000).toISOString().slice(0, 10);
+  const today = todayStr();
   const { width: screenWidth } = useWindowDimensions();
   const calW = Math.min(screenWidth - 48, 316);
   const cellW = Math.floor((calW - 40) / 7);
 
   const [open, setOpen] = useState(false);
   const [viewYear, setViewYear] = useState(() => {
-    const ref = value || todayStr;
+    const ref = value || today;
     return parseInt(ref.slice(0, 4));
   });
   const [viewMonth, setViewMonth] = useState(() => {
-    const ref = value || todayStr;
+    const ref = value || today;
     return parseInt(ref.slice(5, 7)) - 1;
   });
 

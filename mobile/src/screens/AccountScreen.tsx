@@ -184,11 +184,15 @@ export default function AccountScreen({ navigation }: Props) {
     if (!user) return;
     setDeleting(true);
     try {
-      await supabase.from('book_memos').delete().eq('user_id', user.id);
-      await supabase.from('book_tags').delete().eq('user_id', user.id);
-      await supabase.from('reading_sessions').delete().eq('user_id', user.id);
-      await supabase.from('books').delete().eq('user_id', user.id);
-      await supabase.from('tags').delete().eq('user_id', user.id);
+      // Edge Function が auth ユーザーごと削除する（データは FK の CASCADE で消える）
+      const { error } = await supabase.functions.invoke('delete-account');
+      if (error) {
+        // 関数が未デプロイの環境向けフォールバック:
+        // データのみ削除（auth ユーザーは残るため、デプロイ後はこの経路を廃止すること）
+        const { error: e1 } = await supabase.from('books').delete().eq('user_id', user.id);
+        const { error: e2 } = await supabase.from('tags').delete().eq('user_id', user.id);
+        if (e1 || e2) throw new Error('delete failed');
+      }
       await signOut();
     } catch {
       setDeleting(false);

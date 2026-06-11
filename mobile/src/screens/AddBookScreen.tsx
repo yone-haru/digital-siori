@@ -13,6 +13,7 @@ import { supabase } from '../lib/supabase';
 import { useAuth } from '../contexts/AuthContext';
 import { useSubscription } from '../contexts/SubscriptionContext';
 import { C, F } from '../lib/colors';
+import { FREE_LIMITS } from '../lib/limits';
 import { DialInput } from '../components/DialInput';
 import { searchGoogleBooks } from '../lib/google-books';
 import type { GoogleBook } from '../types';
@@ -30,6 +31,7 @@ export default function AddBookScreen() {
   const [searchState, setSearchState] = useState<SearchState>('idle');
   const [addingId, setAddingId] = useState<string | null>(null);
   const [addError, setAddError] = useState<string | null>(null);
+  const [searchError, setSearchError] = useState<string | null>(null);
   const [showManual, setShowManual] = useState(false);
   const [bookCount, setBookCount] = useState(0);
   const inputRef = useRef<TextInput>(null);
@@ -50,14 +52,15 @@ export default function AddBookScreen() {
       const books = await searchGoogleBooks(query);
       setResults(books);
       setSearchState('done');
-    } catch {
+    } catch (e) {
+      setSearchError(e instanceof Error ? e.message : '検索に失敗しました。もう一度お試しください。');
       setSearchState('error');
     }
   }
 
   async function handleAdd(book: GoogleBook) {
     if (!user) return;
-    if (!isPro && bookCount >= 20) { openPaywall(); return; }
+    if (!isPro && bookCount >= FREE_LIMITS.books) { openPaywall(); return; }
     setAddError(null);
     setAddingId(book.googleId);
     const { data, error } = await supabase
@@ -147,7 +150,7 @@ export default function AddBookScreen() {
           )}
 
           {searchState === 'error' && (
-            <Text style={s.errorText}>検索に失敗しました。もう一度お試しください。</Text>
+            <Text style={s.errorText}>{searchError ?? '検索に失敗しました。もう一度お試しください。'}</Text>
           )}
 
           {searchState === 'done' && (
@@ -233,7 +236,7 @@ export default function AddBookScreen() {
                 ],
               }))}
               onCancel={() => setShowManual(false)}
-              canAdd={isPro || bookCount < 20}
+              canAdd={isPro || bookCount < FREE_LIMITS.books}
               onPaywall={openPaywall}
             />
           )}

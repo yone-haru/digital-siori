@@ -13,20 +13,22 @@ import Svg, { Path, Circle } from 'react-native-svg';
 import { supabase } from '../lib/supabase';
 import { useAuth } from '../contexts/AuthContext';
 import { useSubscription } from '../contexts/SubscriptionContext';
+import { useToast } from '../lib/toast';
 import { C, F } from '../lib/colors';
 import { formatDuration, formatSessionDate } from '../lib/utils';
+import { todayStr } from '../lib/date';
+import { FREE_LIMITS } from '../lib/limits';
+import { startReading, finishBook, updateBook, recordSession } from '../data/books';
 import { pendingDelete } from '../lib/pendingDelete';
 import { BottomSheet } from '../components/BottomSheet';
 import { BookCover } from '../components/BookCover';
-import type { Book, ReadingSession, Tag, BookStatus } from '../types';
+import type { Book, ReadingSession, Tag, BookStatus, BookMemo } from '../types';
 import type { RootStackParamList } from '../types/navigation';
 
 type Props = {
   navigation: NativeStackNavigationProp<RootStackParamList, 'BookDetail'>;
   route: RouteProp<RootStackParamList, 'BookDetail'>;
 };
-
-type BookMemo = { id: string; page_number: number; content: string; created_at: string };
 
 const STATUS_LABELS: Record<BookStatus, string> = {
   reading: '読書中', rereading: '再読中', to_read: '未読', finished: '読書完了',
@@ -36,6 +38,7 @@ export default function BookDetailScreen({ navigation, route }: Props) {
   const { bookId } = route.params;
   const { user } = useAuth();
   const { isPro, openPaywall } = useSubscription();
+  const { showToast } = useToast();
   const [book, setBook] = useState<Book | null>(null);
   const [sessions, setSessions] = useState<ReadingSession[]>([]);
   const [allTags, setAllTags] = useState<Tag[]>([]);
@@ -70,7 +73,7 @@ export default function BookDetailScreen({ navigation, route }: Props) {
     const sessionQuery = supabase.from('reading_sessions').select('*').eq('book_id', bookId).order('started_at', { ascending: false });
     const [{ data: b }, { data: s }, { data: btRows }, { data: tagRows }] = await Promise.all([
       supabase.from('books').select('*').eq('id', bookId).single(),
-      isPro ? sessionQuery : sessionQuery.limit(10),
+      isPro ? sessionQuery : sessionQuery.limit(FREE_LIMITS.sessionsPerBook),
       supabase.from('book_tags').select('tag_id').eq('book_id', bookId),
       supabase.from('tags').select('id,name').eq('user_id', user.id).order('created_at'),
     ]);
@@ -78,6 +81,11 @@ export default function BookDetailScreen({ navigation, route }: Props) {
       setBook(b as Book);
       setReview(b.review ?? '');
       setRating(b.rating ?? 0);
+    } else {
+      // 取得失敗時に永久ローディングにしない
+      showToast('本の情報の取得に失敗しました', 'error');
+      navigation.goBack();
+      return;
     }
     const sessionList = (s as ReadingSession[]) ?? [];
     setSessions(sessionList);
@@ -90,15 +98,19 @@ export default function BookDetailScreen({ navigation, route }: Props) {
       .eq('book_id', bookId)
       .order('created_at', { ascending: true });
     setMemos((memoRows as BookMemo[]) ?? []);
-  }, [bookId, user, isPro]);
+  }, [bookId, user, isPro, navigation, showToast]);
 
   useFocusEffect(useCallback(() => { fetchData().finally(() => setLoading(false)); }, [fetchData]));
 
   async function saveReview() {
     setSavingReview(true);
-    await supabase.from('books').update({ review: review || null }).eq('id', bookId);
-    setBook((prev) => prev ? { ...prev, review: review || null } as Book : prev);
+    const r = await updateBook(bookId, { review: review || null });
     setSavingReview(false);
+    if (!r.ok) {
+      showToast(r.message, 'error');
+      return; // 編集状態を維持して入力を失わせない
+    }
+    setBook((prev) => prev ? { ...prev, review: review || null } as Book : prev);
     setEditingReview(false);
   }
 
@@ -108,29 +120,26 @@ export default function BookDetailScreen({ navigation, route }: Props) {
   }
 
   async function changeRating(newRating: number) {
+    const prevRating = rating;
     const val = newRating === rating ? 0 : newRating;
     setRating(val);
-    await supabase.from('books').update({ rating: val === 0 ? null : val }).eq('id', bookId);
+    const r = await updateBook(bookId, { rating: val === 0 ? null : val });
+    if (!r.ok) {
+      setRating(prevRating);
+      showToast(r.message, 'error');
+    }
   }
 
   async function handleFinish() {
     if (!book) return;
     setFinishPending(true);
-    const newReadCount = (book.read_count ?? 0) + 1;
-    await supabase.from('books').update({
-      status: 'finished',
-      finished_at: new Date().toISOString(),
-      read_count: newReadCount,
-      current_page: book.total_pages > 0 ? book.total_pages : book.current_page,
-    }).eq('id', bookId);
-    setBook((prev) => prev ? {
-      ...prev,
-      status: 'finished',
-      finished_at: new Date().toISOString(),
-      read_count: newReadCount,
-      current_page: book.total_pages > 0 ? book.total_pages : book.current_page,
-    } as Book : prev);
+    const r = await finishBook(book);
     setFinishPending(false);
+    if (!r.ok) {
+      showToast(r.message, 'error');
+      return;
+    }
+    setBook((prev) => prev ? { ...prev, ...r.data } as Book : prev);
     setFinishSheetOpen(false);
   }
 
@@ -141,28 +150,46 @@ export default function BookDetailScreen({ navigation, route }: Props) {
   }
 
   async function toggleTag(tagId: string) {
+    const prevIds = bookTagIds;
     if (bookTagIds.includes(tagId)) {
       setBookTagIds((prev) => prev.filter((id) => id !== tagId));
-      await supabase.from('book_tags').delete().eq('book_id', bookId).eq('tag_id', tagId);
+      const { error } = await supabase.from('book_tags').delete().eq('book_id', bookId).eq('tag_id', tagId);
+      if (error) {
+        setBookTagIds(prevIds);
+        showToast('タグの解除に失敗しました', 'error');
+      }
     } else {
       setBookTagIds((prev) => [...prev, tagId]);
-      await supabase.from('book_tags').insert({ book_id: bookId, tag_id: tagId, user_id: user?.id });
+      const { error } = await supabase.from('book_tags').insert({ book_id: bookId, tag_id: tagId, user_id: user?.id });
+      if (error) {
+        setBookTagIds(prevIds);
+        showToast('タグの追加に失敗しました', 'error');
+      }
     }
   }
 
   async function createTag() {
     if (!newTagName.trim() || !user) return;
-    if (!isPro && allTags.length >= 3) { openPaywall(); return; }
+    if (!isPro && allTags.length >= FREE_LIMITS.tags) { openPaywall(); return; }
     setCreatingTag(true);
-    const { data } = await supabase
+    const { data, error } = await supabase
       .from('tags')
       .insert({ name: newTagName.trim(), user_id: user.id })
       .select('id,name')
       .single();
-    if (data) {
-      setAllTags((prev) => [...prev, data as Tag]);
-      setBookTagIds((prev) => [...prev, data.id]);
-      await supabase.from('book_tags').insert({ book_id: bookId, tag_id: data.id, user_id: user.id });
+    if (error || !data) {
+      setCreatingTag(false);
+      showToast('タグの作成に失敗しました', 'error');
+      return;
+    }
+    setAllTags((prev) => [...prev, data as Tag]);
+    setBookTagIds((prev) => [...prev, data.id]);
+    const { error: linkErr } = await supabase
+      .from('book_tags')
+      .insert({ book_id: bookId, tag_id: data.id, user_id: user.id });
+    if (linkErr) {
+      setBookTagIds((prev) => prev.filter((id) => id !== data.id));
+      showToast('タグは作成しましたが、本への紐付けに失敗しました', 'error');
     }
     setNewTagName('');
     setCreatingTag(false);
@@ -172,20 +199,30 @@ export default function BookDetailScreen({ navigation, route }: Props) {
     if (!memoAddText.trim() || !user) return;
     setSavingMemo(true);
     if (editingMemoId) {
-      await supabase.from('book_memos')
+      const { error } = await supabase.from('book_memos')
         .update({ page_number: memoAddPage, content: memoAddText.trim() })
         .eq('id', editingMemoId);
+      if (error) {
+        setSavingMemo(false);
+        showToast('メモの更新に失敗しました', 'error');
+        return; // シートを開いたままにして入力を失わせない
+      }
       setMemos((prev) => prev.map((m) =>
         m.id === editingMemoId ? { ...m, page_number: memoAddPage, content: memoAddText.trim() } : m
       ));
       setEditingMemoId(null);
     } else {
-      const { data } = await supabase
+      const { data, error } = await supabase
         .from('book_memos')
         .insert({ book_id: bookId, user_id: user.id, page_number: memoAddPage, content: memoAddText.trim() })
         .select('id,page_number,content,created_at')
         .single();
-      if (data) setMemos((prev) => [...prev, data as BookMemo]);
+      if (error || !data) {
+        setSavingMemo(false);
+        showToast('メモの保存に失敗しました', 'error');
+        return;
+      }
+      setMemos((prev) => [...prev, data as BookMemo]);
     }
     setMemoAddText('');
     setSavingMemo(false);
@@ -201,9 +238,16 @@ export default function BookDetailScreen({ navigation, route }: Props) {
 
   async function confirmDeleteMemo() {
     if (!deletingMemo) return;
-    setMemos((prev) => prev.filter((m) => m.id !== deletingMemo.id));
-    await supabase.from('book_memos').delete().eq('id', deletingMemo.id);
+    const target = deletingMemo;
+    setMemos((prev) => prev.filter((m) => m.id !== target.id));
     setDeletingMemo(null);
+    const { error } = await supabase.from('book_memos').delete().eq('id', target.id);
+    if (error) {
+      setMemos((prev) => [...prev, target].sort(
+        (a, b) => a.created_at.localeCompare(b.created_at),
+      ));
+      showToast('メモの削除に失敗しました', 'error');
+    }
   }
 
   async function handleStartReading() {
@@ -215,35 +259,29 @@ export default function BookDetailScreen({ navigation, route }: Props) {
       return;
     }
 
-    let startPage = book.current_page;
-
-    if (book.status === 'finished') {
-      await supabase.from('books').update({
-        status: 'rereading',
-        current_page: 0,
-        started_at: new Date().toISOString(),
-      }).eq('id', bookId);
-      startPage = 0;
-    } else if (book.status === 'to_read') {
-      await supabase.from('books').update({
-        status: 'reading',
-        started_at: new Date().toISOString(),
-      }).eq('id', bookId);
+    const r = await startReading(book);
+    if (!r.ok) {
+      showToast(r.message, 'error');
+      return;
     }
 
     navigation.navigate('ReadingTimer', {
       bookId: book.id, bookTitle: book.title, bookAuthor: book.author,
-      startPage, totalPages: book.total_pages,
+      startPage: r.data.startPage, totalPages: book.total_pages,
     });
   }
 
   async function goFirstTime() {
     if (!book) return;
-    setStartSheetOpen(false);
-    await supabase.from('books').update({
+    const r = await updateBook(bookId, {
       status: 'reading',
       started_at: new Date().toISOString(),
-    }).eq('id', bookId);
+    });
+    if (!r.ok) {
+      showToast(r.message, 'error');
+      return;
+    }
+    setStartSheetOpen(false);
     navigation.navigate('ReadingTimer', {
       bookId: book.id, bookTitle: book.title, bookAuthor: book.author,
       startPage: 0, totalPages: book.total_pages,
@@ -253,13 +291,17 @@ export default function BookDetailScreen({ navigation, route }: Props) {
   async function goPrevRead() {
     if (!book) return;
     setInitPending(true);
-    await supabase.from('books').update({
+    const r = await updateBook(bookId, {
       read_count: prevReadCount,
       current_page: initStartPage,
       status: 'reading',
       started_at: new Date().toISOString(),
-    }).eq('id', bookId);
+    });
     setInitPending(false);
+    if (!r.ok) {
+      showToast(r.message, 'error');
+      return;
+    }
     setStartSheetOpen(false);
     navigation.navigate('ReadingTimer', {
       bookId: book.id, bookTitle: book.title, bookAuthor: book.author,
@@ -548,7 +590,7 @@ export default function BookDetailScreen({ navigation, route }: Props) {
                   </View>
                 );
               })}
-              {!isPro && sessions.length >= 10 && (
+              {!isPro && sessions.length >= FREE_LIMITS.sessionsPerBook && (
                 <TouchableOpacity style={s.proSessionBanner} onPress={openPaywall} activeOpacity={0.8}>
                   <Text style={s.proSessionBannerText}>Proプランで全履歴を表示</Text>
                 </TouchableOpacity>
@@ -775,8 +817,6 @@ export default function BookDetailScreen({ navigation, route }: Props) {
           userId={user?.id ?? ''}
           currentPage={book.current_page}
           totalPages={book.total_pages}
-          bookStatus={book.status}
-          readCount={book.read_count ?? 0}
           sessionDates={sessions.map(s => s.started_at.slice(0, 10))}
           onSave={async () => {
             setManualSessionOpen(false);
@@ -790,13 +830,13 @@ export default function BookDetailScreen({ navigation, route }: Props) {
 }
 
 function ManualSessionSheet({
-  bookId, userId, currentPage, totalPages, bookStatus, readCount, sessionDates, onSave, onCancel,
+  bookId, userId, currentPage, totalPages, sessionDates, onSave, onCancel,
 }: {
   bookId: string; userId: string; currentPage: number; totalPages: number;
-  bookStatus: string; readCount: number; sessionDates?: string[];
+  sessionDates?: string[];
   onSave: () => void; onCancel: () => void;
 }) {
-  const today = new Date(Date.now() + 9 * 3600 * 1000).toISOString().slice(0, 10);
+  const today = todayStr();
   const [date, setDate] = useState(today);
   const [startPage, setStartPage] = useState(currentPage);
   const [endPage, setEndPage] = useState(currentPage);
@@ -811,39 +851,20 @@ function ManualSessionSheet({
     if (durationMin < 1) { setError('読書時間は1分以上にしてください'); return; }
     setSaving(true);
     setError(null);
-    const startedAt = new Date(`${date}T12:00:00+09:00`).toISOString();
+    const startedAt = new Date(`${date}T12:00:00`).toISOString();
     const endedAt = new Date(new Date(startedAt).getTime() + durationMin * 60 * 1000).toISOString();
-    const { error: e1 } = await supabase.from('reading_sessions').insert({
-      book_id: bookId, user_id: userId,
-      started_at: startedAt, ended_at: endedAt,
-      start_page: startPage, end_page: endPage, duration_seconds: durationMin * 60,
+
+    const result = await recordSession({
+      bookId, userId,
+      startedAt, endedAt,
+      startPage, endPage,
+      durationSeconds: durationMin * 60,
     });
-    if (e1) { setSaving(false); setError('保存に失敗しました'); return; }
-
-    const isNowFinished = totalPages > 0 && endPage >= totalPages;
-    const bookUpdates: Record<string, unknown> = {};
-
-    if (isNowFinished) {
-      bookUpdates.status = 'finished';
-      bookUpdates.finished_at = startedAt;
-      bookUpdates.read_count = readCount + 1;
-      bookUpdates.current_page = endPage;
-    } else if (bookStatus === 'to_read') {
-      bookUpdates.status = 'reading';
-      bookUpdates.started_at = startedAt;
-      if (endPage > currentPage) bookUpdates.current_page = endPage;
-    } else if (bookStatus === 'finished') {
-      bookUpdates.status = 'rereading';
-      bookUpdates.started_at = startedAt;
-      bookUpdates.current_page = endPage;
-    } else {
-      if (endPage > currentPage) bookUpdates.current_page = endPage;
-    }
-
-    if (Object.keys(bookUpdates).length > 0) {
-      await supabase.from('books').update(bookUpdates).eq('id', bookId);
-    }
     setSaving(false);
+    if (!result.ok) {
+      setError(result.message);
+      return;
+    }
     onSave();
   }
 

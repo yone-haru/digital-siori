@@ -1,4 +1,4 @@
-import React, { createContext, useContext, useEffect, useState } from 'react';
+import React, { createContext, useContext, useEffect, useState, useMemo, useCallback } from 'react';
 import Purchases, { LOG_LEVEL } from 'react-native-purchases';
 import { Platform, Alert } from 'react-native';
 import Constants from 'expo-constants';
@@ -110,12 +110,16 @@ export function SubscriptionProvider({ children }: { children: React.ReactNode }
     }
   }
 
+  const openPaywall = useCallback(() => setPaywallOpen(true), []);
+  const closePaywall = useCallback(() => setPaywallOpen(false), []);
+
+  const value = useMemo(() => ({
+    isPro, loading, paywallOpen, openPaywall, closePaywall,
+    purchaseMonthly, purchaseYearly, restorePurchases,
+  }), [isPro, loading, paywallOpen, openPaywall, closePaywall]);
+
   return (
-    <SubscriptionContext.Provider value={{
-      isPro, loading,
-      paywallOpen, openPaywall: () => setPaywallOpen(true), closePaywall: () => setPaywallOpen(false),
-      purchaseMonthly, purchaseYearly, restorePurchases,
-    }}>
+    <SubscriptionContext.Provider value={value}>
       {children}
     </SubscriptionContext.Provider>
   );
