@@ -1,12 +1,12 @@
-import React, { useState, useCallback } from 'react';
+import React, { useState, useCallback, useEffect, useMemo } from 'react';
 import {
   View, Text, ScrollView, TouchableOpacity, StyleSheet,
   ActivityIndicator, RefreshControl,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useFocusEffect } from '@react-navigation/native';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { CalendarPicker } from '../components/CalendarPicker';
-import { supabase } from '../lib/supabase';
 import { useAuth } from '../contexts/AuthContext';
 import { useSubscription } from '../contexts/SubscriptionContext';
 import { useToast } from '../lib/toast';
@@ -16,7 +16,7 @@ import {
   makeDayLabel, calcStreak,
 } from '../lib/utils';
 import { todayStr, dateStrOf } from '../lib/date';
-import { FREE_LIMITS } from '../lib/limits';
+import { fetchStatsRaw, queryKeys } from '../data/queries';
 import { BookCover } from '../components/BookCover';
 
 type BookDayStat = {
@@ -39,39 +39,31 @@ export default function StatsScreen() {
   const { user } = useAuth();
   const { isPro, openPaywall } = useSubscription();
   const { showToast } = useToast();
+  const queryClient = useQueryClient();
   const [tab, setTab] = useState<'today' | 'all'>('today');
-  const [dayStats, setDayStats] = useState<DayStat[]>([]);
-  const [overall, setOverall] = useState<OverallStats | null>(null);
-  const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
 
-  const fetchStats = useCallback(async () => {
-    if (!user) return;
+  const { data, isLoading, isError, refetch } = useQuery({
+    queryKey: queryKeys.stats(user?.id ?? '', isPro),
+    queryFn: () => fetchStatsRaw(user!.id, isPro),
+    enabled: !!user,
+  });
+
+  useEffect(() => {
+    if (isError) showToast('統計の読み込みに失敗しました', 'error');
+  }, [isError, showToast]);
+
+  // 他画面での記録を反映（キャッシュ表示→裏で再取得）
+  useFocusEffect(useCallback(() => {
+    queryClient.invalidateQueries({ queryKey: ['stats'] });
+  }, [queryClient]));
+
+  const { dayStats, overall } = useMemo((): { dayStats: DayStat[]; overall: OverallStats | null } => {
+    if (!data) return { dayStats: [], overall: null };
     const today = todayStr();
+    const { books, sessions } = data;
 
-    let sessionsQuery = supabase.from('reading_sessions')
-      .select('id,book_id,started_at,start_page,end_page,duration_seconds')
-      .eq('user_id', user.id)
-      .order('started_at', { ascending: false });
-    if (!isPro) {
-      const cutoff = new Date();
-      cutoff.setMonth(cutoff.getMonth() - FREE_LIMITS.statsMonths);
-      sessionsQuery = sessionsQuery.gte('started_at', cutoff.toISOString());
-    }
-    const [booksRes, sessionsRes, streakRes] = await Promise.all([
-      supabase.from('books').select('id,title,author,cover_url,current_page,total_pages,status'),
-      sessionsQuery,
-      // streak は無料プランの表示期間に関係なく全期間の日付で計算する（日付のみの軽量クエリ）
-      supabase.from('reading_sessions').select('started_at').eq('user_id', user.id),
-    ]);
-    if (booksRes.error || sessionsRes.error) {
-      showToast('統計の読み込みに失敗しました', 'error');
-      return;
-    }
-    const books = booksRes.data;
-    const sessions = sessionsRes.data;
-
-    const bookMap = new Map((books ?? []).map((b) => [b.id, b]));
+    const bookMap = new Map(books.map((b) => [b.id, b]));
 
     type DayBookAgg = { dayPages: number; dayMinutes: number; daySessions: number };
     const byDate = new Map<string, Map<string, DayBookAgg>>();
@@ -104,33 +96,33 @@ export default function StatsScreen() {
         return { date: dateStr, label: makeDayLabel(dateStr, today), minutes: totalMin, pages: totalPg, sessions: totalSess, books: bookDayStats };
       });
 
-    setDayStats(dStats);
-
-    const allDates = (sessions ?? []).map((s) => dateStrOf(s.started_at));
+    const allDates = sessions.map((s) => dateStrOf(s.started_at));
     const uniqueDays = new Set(allDates).size;
-    const totalSeconds = (sessions ?? []).reduce((s, r) => s + (r.duration_seconds ?? 0), 0);
+    const totalSeconds = sessions.reduce((s, r) => s + (r.duration_seconds ?? 0), 0);
     const { hours, minutes } = splitDuration(totalSeconds);
     const avgMin = uniqueDays > 0 ? Math.round(totalSeconds / 60 / uniqueDays) : 0;
-    const totalPages = (sessions ?? []).reduce((s, r) => s + Math.max(0, (r.end_page ?? 0) - (r.start_page ?? 0)), 0);
-    const streakDates = (streakRes.data ?? []).map((r) => dateStrOf(r.started_at));
+    const totalPages = sessions.reduce((s, r) => s + Math.max(0, (r.end_page ?? 0) - (r.start_page ?? 0)), 0);
+    // streak は無料プランの表示期間に関係なく全期間の日付で計算する
+    const streakDates = data.allSessionStarts.map(dateStrOf);
 
-    setOverall({
-      hours, minutes, avgMinPerDay: avgMin,
-      finishedCount: (books ?? []).filter((b) => b.status === 'finished').length,
-      readingCount: (books ?? []).filter((b) => b.status === 'reading').length,
-      totalPages, streak: calcStreak(streakDates, today),
-    });
-  }, [user, isPro, showToast]);
-
-  useFocusEffect(useCallback(() => { fetchStats().finally(() => setLoading(false)); }, [fetchStats]));
+    return {
+      dayStats: dStats,
+      overall: {
+        hours, minutes, avgMinPerDay: avgMin,
+        finishedCount: books.filter((b) => b.status === 'finished').length,
+        readingCount: books.filter((b) => b.status === 'reading').length,
+        totalPages, streak: calcStreak(streakDates, today),
+      },
+    };
+  }, [data]);
 
   const onRefresh = useCallback(async () => {
     setRefreshing(true);
-    await fetchStats();
+    await refetch();
     setRefreshing(false);
-  }, [fetchStats]);
+  }, [refetch]);
 
-  if (loading) {
+  if (isLoading) {
     return (
       <SafeAreaView style={s.container} edges={['top']}>
         <ActivityIndicator color={C.ink} style={{ flex: 1 }} />
@@ -177,10 +169,12 @@ export default function StatsScreen() {
 }
 
 function TodayTab({ dayStats }: { dayStats: DayStat[] }) {
-  const [selectedDate, setSelectedDate] = useState(dayStats[0]?.date ?? '');
+  const today = todayStr();
+  const [selectedDate, setSelectedDate] = useState(dayStats[0]?.date ?? today);
   const dayIdx = dayStats.findIndex((d) => d.date === selectedDate);
   const day: DayStat = dayIdx !== -1 ? dayStats[dayIdx] : {
-    date: selectedDate, label: selectedDate, minutes: 0, pages: 0, sessions: 0, books: [],
+    date: selectedDate, label: makeDayLabel(selectedDate, today),
+    minutes: 0, pages: 0, sessions: 0, books: [],
   };
 
   // Week chart data
@@ -190,11 +184,13 @@ function TodayTab({ dayStats }: { dayStats: DayStat[] }) {
   const monday = new Date(d);
   monday.setUTCDate(d.getUTCDate() - activeIdx);
   const minsByDay: number[] = Array(7).fill(0);
+  const weekDates: string[] = Array(7).fill('');
   let weekTotal = 0;
   for (let i = 0; i < 7; i++) {
     const wd = new Date(monday);
     wd.setUTCDate(monday.getUTCDate() + i);
-    const found = dayStats.find((s) => s.date === wd.toISOString().slice(0, 10));
+    weekDates[i] = wd.toISOString().slice(0, 10);
+    const found = dayStats.find((s) => s.date === weekDates[i]);
     if (found) { minsByDay[i] = found.minutes; weekTotal += found.minutes; }
   }
   const maxMins = Math.max(...minsByDay, 1);
@@ -264,8 +260,16 @@ function TodayTab({ dayStats }: { dayStats: DayStat[] }) {
             const mins = minsByDay[i];
             const barH = mins > 0 ? Math.max(4, Math.round((mins / maxMins) * BAR_MAX_H)) : 0;
             const isActive = i === activeIdx;
+            const isFuture = weekDates[i] > today;
             return (
-              <View key={i} style={t.barCol}>
+              // バーをタップしてその日の記録に移動できる
+              <TouchableOpacity
+                key={i} style={t.barCol}
+                disabled={isFuture}
+                onPress={() => setSelectedDate(weekDates[i])}
+                activeOpacity={0.6}
+                hitSlop={4}
+              >
                 <View style={[t.barContainer, { height: BAR_MAX_H + 16 }]}>
                   {mins > 0 && (
                     <Text style={[t.barMinLabel, { color: isActive ? C.ink : C.muted2, opacity: isActive ? 1 : 0.7 }]}>
@@ -276,8 +280,8 @@ function TodayTab({ dayStats }: { dayStats: DayStat[] }) {
                     <View style={[t.bar, { height: barH, backgroundColor: isActive ? C.ink : C.muted2, opacity: isActive ? 1 : 0.55 }]} />
                   )}
                 </View>
-                <Text style={isActive ? t.dayLabelActive : t.dayLabel}>{label}</Text>
-              </View>
+                <Text style={[isActive ? t.dayLabelActive : t.dayLabel, isFuture && { opacity: 0.35 }]}>{label}</Text>
+              </TouchableOpacity>
             );
           })}
         </View>

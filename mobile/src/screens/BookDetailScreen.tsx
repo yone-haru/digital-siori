@@ -1,4 +1,4 @@
-import React, { useState, useCallback } from 'react';
+import React, { useState, useCallback, useEffect, useRef } from 'react';
 import {
   View, Text, ScrollView, TouchableOpacity, StyleSheet,
   TextInput, ActivityIndicator,
@@ -9,7 +9,8 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { useFocusEffect } from '@react-navigation/native';
 import type { RouteProp } from '@react-navigation/native';
-import Svg, { Path, Circle } from 'react-native-svg';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
+import Svg, { Path } from 'react-native-svg';
 import { supabase } from '../lib/supabase';
 import { useAuth } from '../contexts/AuthContext';
 import { useSubscription } from '../contexts/SubscriptionContext';
@@ -19,6 +20,7 @@ import { formatDuration, formatSessionDate } from '../lib/utils';
 import { todayStr } from '../lib/date';
 import { FREE_LIMITS } from '../lib/limits';
 import { startReading, finishBook, updateBook, recordSession } from '../data/books';
+import { fetchBookDetail, queryKeys } from '../data/queries';
 import { pendingDelete } from '../lib/pendingDelete';
 import { BottomSheet } from '../components/BottomSheet';
 import { BookCover } from '../components/BookCover';
@@ -39,8 +41,8 @@ export default function BookDetailScreen({ navigation, route }: Props) {
   const { user } = useAuth();
   const { isPro, openPaywall } = useSubscription();
   const { showToast } = useToast();
+  const queryClient = useQueryClient();
   const [book, setBook] = useState<Book | null>(null);
-  const [sessions, setSessions] = useState<ReadingSession[]>([]);
   const [allTags, setAllTags] = useState<Tag[]>([]);
   const [bookTagIds, setBookTagIds] = useState<string[]>([]);
   const [memos, setMemos] = useState<BookMemo[]>([]);
@@ -50,7 +52,6 @@ export default function BookDetailScreen({ navigation, route }: Props) {
   const [savingMemo, setSavingMemo] = useState(false);
   const [editingMemoId, setEditingMemoId] = useState<string | null>(null);
   const [deletingMemo, setDeletingMemo] = useState<BookMemo | null>(null);
-  const [loading, setLoading] = useState(true);
   const [deleteSheetOpen, setDeleteSheetOpen] = useState(false);
   const [finishSheetOpen, setFinishSheetOpen] = useState(false);
   const [finishPending, setFinishPending] = useState(false);
@@ -68,39 +69,40 @@ export default function BookDetailScreen({ navigation, route }: Props) {
   const [newTagName, setNewTagName] = useState('');
   const [creatingTag, setCreatingTag] = useState(false);
 
-  const fetchData = useCallback(async () => {
-    if (!user) return;
-    const sessionQuery = supabase.from('reading_sessions').select('*').eq('book_id', bookId).order('started_at', { ascending: false });
-    const [{ data: b }, { data: s }, { data: btRows }, { data: tagRows }] = await Promise.all([
-      supabase.from('books').select('*').eq('id', bookId).single(),
-      isPro ? sessionQuery : sessionQuery.limit(FREE_LIMITS.sessionsPerBook),
-      supabase.from('book_tags').select('tag_id').eq('book_id', bookId),
-      supabase.from('tags').select('id,name').eq('user_id', user.id).order('created_at'),
-    ]);
-    if (b) {
-      setBook(b as Book);
-      setReview(b.review ?? '');
-      setRating(b.rating ?? 0);
-    } else {
-      // 取得失敗時に永久ローディングにしない
+  const { data, isLoading, isError } = useQuery({
+    queryKey: queryKeys.book(bookId, isPro),
+    queryFn: () => fetchBookDetail(bookId, user!.id, isPro),
+    enabled: !!user,
+  });
+  const sessions: ReadingSession[] = data?.sessions ?? [];
+
+  // 編集中にバックグラウンド再取得が走っても入力を失わないよう ref で参照する
+  const editingReviewRef = useRef(editingReview);
+  editingReviewRef.current = editingReview;
+
+  // 取得結果を編集用ローカル state に同期（楽観的更新のベースになる）
+  useEffect(() => {
+    if (!data) return;
+    setBook(data.book);
+    setRating(data.book.rating ?? 0);
+    if (!editingReviewRef.current) setReview(data.book.review ?? '');
+    setMemos(data.memos);
+    setAllTags(data.allTags);
+    setBookTagIds(data.bookTagIds);
+  }, [data]);
+
+  // 取得失敗時に永久ローディングにしない
+  useEffect(() => {
+    if (isError && !data) {
       showToast('本の情報の取得に失敗しました', 'error');
       navigation.goBack();
-      return;
     }
-    const sessionList = (s as ReadingSession[]) ?? [];
-    setSessions(sessionList);
-    setBookTagIds((btRows ?? []).map((r: { tag_id: string }) => r.tag_id));
-    setAllTags((tagRows as Tag[]) ?? []);
+  }, [isError, data, navigation, showToast]);
 
-    const { data: memoRows } = await supabase
-      .from('book_memos')
-      .select('id,page_number,content,created_at')
-      .eq('book_id', bookId)
-      .order('created_at', { ascending: true });
-    setMemos((memoRows as BookMemo[]) ?? []);
-  }, [bookId, user, isPro, navigation, showToast]);
-
-  useFocusEffect(useCallback(() => { fetchData().finally(() => setLoading(false)); }, [fetchData]));
+  // タイマーから戻った直後などに最新化（キャッシュ表示→裏で再取得）
+  useFocusEffect(useCallback(() => {
+    queryClient.invalidateQueries({ queryKey: ['book', bookId] });
+  }, [queryClient, bookId]));
 
   async function saveReview() {
     setSavingReview(true);
@@ -150,6 +152,7 @@ export default function BookDetailScreen({ navigation, route }: Props) {
   }
 
   async function toggleTag(tagId: string) {
+    if (!user) return;
     const prevIds = bookTagIds;
     if (bookTagIds.includes(tagId)) {
       setBookTagIds((prev) => prev.filter((id) => id !== tagId));
@@ -160,7 +163,7 @@ export default function BookDetailScreen({ navigation, route }: Props) {
       }
     } else {
       setBookTagIds((prev) => [...prev, tagId]);
-      const { error } = await supabase.from('book_tags').insert({ book_id: bookId, tag_id: tagId, user_id: user?.id });
+      const { error } = await supabase.from('book_tags').insert({ book_id: bookId, tag_id: tagId, user_id: user.id });
       if (error) {
         setBookTagIds(prevIds);
         showToast('タグの追加に失敗しました', 'error');
@@ -309,7 +312,7 @@ export default function BookDetailScreen({ navigation, route }: Props) {
     });
   }
 
-  if (loading || !book) {
+  if (isLoading || !book) {
     return (
       <SafeAreaView style={s.container} edges={['top']}>
         <ActivityIndicator color={C.ink} style={{ flex: 1 }} />
@@ -350,9 +353,9 @@ export default function BookDetailScreen({ navigation, route }: Props) {
         <Text style={s.topBarTitle}>Detail</Text>
         <TouchableOpacity onPress={() => setDeleteSheetOpen(true)} hitSlop={8}>
           <Svg width="22" height="22" viewBox="0 0 22 22" fill="none">
-            <Circle cx="11" cy="5" r="1.4" fill={C.muted} />
-            <Circle cx="11" cy="11" r="1.4" fill={C.muted} />
-            <Circle cx="11" cy="17" r="1.4" fill={C.muted} />
+            <Path d="M4 7h14" stroke={C.muted} strokeWidth="1.4" strokeLinecap="round" />
+            <Path d="M8.5 7V5a.5.5 0 0 1 .5-.5h4a.5.5 0 0 1 .5.5v2" stroke={C.muted} strokeWidth="1.4" strokeLinecap="round" />
+            <Path d="M5.5 7l.8 10a1 1 0 0 0 1 .94h7.4a1 1 0 0 0 1-.94l.8-10" stroke={C.muted} strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round" />
           </Svg>
         </TouchableOpacity>
       </View>
@@ -392,7 +395,11 @@ export default function BookDetailScreen({ navigation, route }: Props) {
 
         {/* Start reading */}
         <TouchableOpacity style={s.startBtn} activeOpacity={0.85} onPress={handleStartReading}>
-          <Text style={s.startBtnText}>読書をはじめる</Text>
+          <Text style={s.startBtnText}>
+            {book.status === 'finished' ? 'もう一度読む'
+              : book.status === 'reading' || book.status === 'rereading' ? '読書をつづける'
+              : '読書をはじめる'}
+          </Text>
           <Svg width="12" height="12" viewBox="0 0 12 12" fill="none">
             <Path d="M2 2l8 4-8 4V2z" fill={C.paper} />
           </Svg>
@@ -818,9 +825,9 @@ export default function BookDetailScreen({ navigation, route }: Props) {
           currentPage={book.current_page}
           totalPages={book.total_pages}
           sessionDates={sessions.map(s => s.started_at.slice(0, 10))}
-          onSave={async () => {
+          onSave={() => {
             setManualSessionOpen(false);
-            await fetchData();
+            queryClient.invalidateQueries({ queryKey: ['book', bookId] });
           }}
           onCancel={() => setManualSessionOpen(false)}
         />

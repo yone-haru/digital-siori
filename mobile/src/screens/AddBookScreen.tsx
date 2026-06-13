@@ -1,4 +1,4 @@
-import React, { useState, useRef } from 'react';
+import React, { useState, useRef, useCallback } from 'react';
 import {
   View, Text, TextInput, TouchableOpacity, StyleSheet,
   Image, ActivityIndicator, KeyboardAvoidingView,
@@ -6,14 +6,16 @@ import {
 } from 'react-native';
 import * as ImagePicker from 'expo-image-picker';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { useNavigation, CommonActions } from '@react-navigation/native';
+import { useNavigation, useFocusEffect, CommonActions } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import Svg, { Circle, Path } from 'react-native-svg';
 import { supabase } from '../lib/supabase';
 import { useAuth } from '../contexts/AuthContext';
 import { useSubscription } from '../contexts/SubscriptionContext';
 import { C, F } from '../lib/colors';
 import { FREE_LIMITS } from '../lib/limits';
+import { fetchBookCount, fetchExistingBooks, queryKeys } from '../data/queries';
 import { DialInput } from '../components/DialInput';
 import { searchGoogleBooks } from '../lib/google-books';
 import type { GoogleBook } from '../types';
@@ -33,14 +35,32 @@ export default function AddBookScreen() {
   const [addError, setAddError] = useState<string | null>(null);
   const [searchError, setSearchError] = useState<string | null>(null);
   const [showManual, setShowManual] = useState(false);
-  const [bookCount, setBookCount] = useState(0);
   const inputRef = useRef<TextInput>(null);
+  const queryClient = useQueryClient();
 
-  React.useEffect(() => {
-    if (!user) return;
-    supabase.from('books').select('id', { count: 'exact', head: true })
-      .then(({ count }) => setBookCount(count ?? 0));
-  }, [user]);
+  // 無料プランの冊数上限チェック用。削除や追加後も focus 時に最新化される
+  const { data: bookCount = 0 } = useQuery({
+    queryKey: queryKeys.bookCount(user?.id ?? ''),
+    queryFn: fetchBookCount,
+    enabled: !!user,
+  });
+  const { data: existingBooks = [] } = useQuery({
+    queryKey: queryKeys.existingBooks(user?.id ?? ''),
+    queryFn: fetchExistingBooks,
+    enabled: !!user,
+  });
+  useFocusEffect(useCallback(() => {
+    queryClient.invalidateQueries({ queryKey: ['bookCount'] });
+    queryClient.invalidateQueries({ queryKey: ['existingBooks'] });
+  }, [queryClient]));
+
+  function isAlreadyAdded(book: GoogleBook): boolean {
+    if (book.isbn) {
+      if (existingBooks.some((b) => b.isbn === book.isbn)) return true;
+    }
+    const norm = (s: string) => s.trim().toLowerCase();
+    return existingBooks.some((b) => norm(b.title) === norm(book.title));
+  }
 
   async function handleSearch() {
     if (!query.trim()) return;
@@ -109,6 +129,14 @@ export default function AddBookScreen() {
           <Text style={s.title}>本を棚に加える</Text>
           <Text style={s.subtitle}>タイトルや著者で検索してください</Text>
 
+          {/* 無料プランの上限到達を事前に知らせる（追加タップ時に突然ペイウォールを出さない） */}
+          {!isPro && bookCount >= FREE_LIMITS.books && (
+            <TouchableOpacity style={s.limitBanner} onPress={openPaywall} activeOpacity={0.8}>
+              <Text style={s.limitBannerText}>無料プランの上限（{FREE_LIMITS.books}冊）に達しています</Text>
+              <Text style={s.limitBannerLink}>Proで無制限に →</Text>
+            </TouchableOpacity>
+          )}
+
           {/* Search bar */}
           <View style={s.searchBar}>
             <Svg width="16" height="16" viewBox="0 0 16 16" fill="none">
@@ -124,7 +152,6 @@ export default function AddBookScreen() {
               placeholderTextColor={C.muted2}
               returnKeyType="search"
               onSubmitEditing={handleSearch}
-              autoFocus
             />
             {query.length > 0 && (
               <TouchableOpacity onPress={clearSearch} hitSlop={8}>
@@ -166,41 +193,50 @@ export default function AddBookScreen() {
               {addError && <Text style={s.errorText}>{addError}</Text>}
 
               {results.length > 0 ? (
-                results.map((book) => (
-                  <View key={book.googleId} style={s.resultItem}>
-                    <View style={s.thumbnail}>
-                      {book.thumbnail ? (
-                        <Image source={{ uri: book.thumbnail }} style={s.thumbnailImg} resizeMode="cover" />
-                      ) : (
-                        <View style={s.thumbnailFallback}>
-                          <Text style={s.thumbnailFallbackText}>{book.title.slice(0, 4)}</Text>
+                results.map((book) => {
+                  const added = isAlreadyAdded(book);
+                  return (
+                    <View key={book.googleId} style={s.resultItem}>
+                      <View style={s.thumbnail}>
+                        {book.thumbnail ? (
+                          <Image source={{ uri: book.thumbnail }} style={s.thumbnailImg} resizeMode="cover" />
+                        ) : (
+                          <View style={s.thumbnailFallback}>
+                            <Text style={s.thumbnailFallbackText}>{book.title.slice(0, 4)}</Text>
+                          </View>
+                        )}
+                      </View>
+                      <View style={s.resultInfo}>
+                        <Text style={s.resultTitle} numberOfLines={2}>{book.title}</Text>
+                        <Text style={s.resultAuthor} numberOfLines={1}>{book.author}</Text>
+                        <Text style={s.resultMeta}>
+                          {book.publishedYear}{book.publishedYear && book.pageCount > 0 ? ' · ' : ''}
+                          {book.pageCount > 0 ? `${book.pageCount}p` : ''}
+                        </Text>
+                      </View>
+                      {added ? (
+                        <View style={s.addedBadge}>
+                          <Text style={s.addedBadgeText}>登録済み</Text>
                         </View>
+                      ) : (
+                        <TouchableOpacity
+                          style={s.addBtn}
+                          onPress={() => handleAdd(book)}
+                          disabled={addingId === book.googleId}
+                          activeOpacity={0.7}
+                        >
+                          {addingId === book.googleId
+                            ? <Text style={s.addBtnSpinner}>…</Text>
+                            : (
+                              <Svg width="14" height="14" viewBox="0 0 14 14" fill="none">
+                                <Path d="M7 2v10M2 7h10" stroke={C.muted} strokeWidth="1.4" strokeLinecap="round" />
+                              </Svg>
+                            )}
+                        </TouchableOpacity>
                       )}
                     </View>
-                    <View style={s.resultInfo}>
-                      <Text style={s.resultTitle} numberOfLines={2}>{book.title}</Text>
-                      <Text style={s.resultAuthor} numberOfLines={1}>{book.author}</Text>
-                      <Text style={s.resultMeta}>
-                        {book.publishedYear}{book.publishedYear && book.pageCount > 0 ? ' · ' : ''}
-                        {book.pageCount > 0 ? `${book.pageCount}p` : ''}
-                      </Text>
-                    </View>
-                    <TouchableOpacity
-                      style={s.addBtn}
-                      onPress={() => handleAdd(book)}
-                      disabled={addingId === book.googleId}
-                      activeOpacity={0.7}
-                    >
-                      {addingId === book.googleId
-                        ? <Text style={s.addBtnSpinner}>…</Text>
-                        : (
-                          <Svg width="14" height="14" viewBox="0 0 14 14" fill="none">
-                            <Path d="M7 2v10M2 7h10" stroke={C.muted} strokeWidth="1.4" strokeLinecap="round" />
-                          </Svg>
-                        )}
-                    </TouchableOpacity>
-                  </View>
-                ))
+                  );
+                })
               ) : (
                 <Text style={s.noResults}>「{query}」の検索結果が見つかりませんでした</Text>
               )}
@@ -383,6 +419,13 @@ const s = StyleSheet.create({
   header: { paddingHorizontal: 28, paddingTop: 16, paddingBottom: 0 },
   title: { fontFamily: F.shippori, fontSize: 26, color: C.ink, marginBottom: 4 },
   subtitle: { fontFamily: F.zen, fontSize: 12, color: C.muted, marginBottom: 24 },
+  limitBanner: {
+    flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center',
+    marginBottom: 16, paddingHorizontal: 14, paddingVertical: 10,
+    borderRadius: 2, borderWidth: 1, borderColor: C.line, backgroundColor: C.line2,
+  },
+  limitBannerText: { fontFamily: F.zen, fontSize: 11, color: C.muted },
+  limitBannerLink: { fontFamily: F.zen, fontSize: 11, color: C.ink, textDecorationLine: 'underline' },
   searchBar: {
     flexDirection: 'row', alignItems: 'center', gap: 10,
     borderBottomWidth: 1.5, borderBottomColor: C.ink, paddingBottom: 10, marginBottom: 28,
@@ -427,6 +470,11 @@ const s = StyleSheet.create({
     alignItems: 'center', justifyContent: 'center',
   },
   addBtnSpinner: { fontFamily: F.cormorant, fontSize: 11, color: C.muted },
+  addedBadge: {
+    paddingHorizontal: 8, paddingVertical: 4,
+    borderRadius: 2, backgroundColor: C.line2,
+  },
+  addedBadgeText: { fontFamily: F.zen, fontSize: 10, letterSpacing: 0.5, color: C.muted2 },
   noResults: {
     fontFamily: F.zen, fontSize: 13, color: C.muted, textAlign: 'center', paddingVertical: 32,
   },

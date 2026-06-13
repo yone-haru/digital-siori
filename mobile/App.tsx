@@ -1,9 +1,10 @@
 import React, { useEffect } from 'react';
-import { View, ActivityIndicator } from 'react-native';
+import { View, ActivityIndicator, AppState } from 'react-native';
+import { QueryClientProvider, focusManager } from '@tanstack/react-query';
 import { NavigationContainer } from '@react-navigation/native';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
-import { SafeAreaProvider } from 'react-native-safe-area-context';
+import { SafeAreaProvider, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { StatusBar } from 'expo-status-bar';
 import * as Linking from 'expo-linking';
 import {
@@ -21,6 +22,7 @@ import {
 } from '@expo-google-fonts/zen-kaku-gothic-new';
 import Svg, { Rect, Circle, Path } from 'react-native-svg';
 
+import { queryClient } from './src/lib/queryClient';
 import { AuthProvider, useAuth } from './src/contexts/AuthContext';
 import { SubscriptionProvider, useSubscription } from './src/contexts/SubscriptionContext';
 import { ToastProvider } from './src/lib/toast';
@@ -81,6 +83,8 @@ function AuthNavigator() {
 }
 
 function MainNavigator() {
+  // ジェスチャーナビゲーション端末でホームインジケーターと重ならないようにする
+  const insets = useSafeAreaInsets();
   return (
     <MainTab.Navigator
       screenOptions={{
@@ -89,7 +93,8 @@ function MainNavigator() {
           backgroundColor: C.paper,
           borderTopColor: C.line,
           borderTopWidth: 1,
-          height: 60,
+          height: 60 + insets.bottom,
+          paddingBottom: insets.bottom,
         },
         tabBarActiveTintColor: C.ink,
         tabBarInactiveTintColor: C.muted2,
@@ -170,6 +175,14 @@ export default function App() {
     return () => sub.remove();
   }, []);
 
+  // バックグラウンド復帰時に React Query の refetch を発火させる
+  useEffect(() => {
+    const sub = AppState.addEventListener('change', (status) => {
+      focusManager.setFocused(status === 'active');
+    });
+    return () => sub.remove();
+  }, []);
+
   const [fontsLoaded] = useFonts({
     CormorantGaramond_300Light,
     CormorantGaramond_400Regular,
@@ -189,6 +202,7 @@ export default function App() {
 
   return (
     <SafeAreaProvider>
+      <QueryClientProvider client={queryClient}>
       <AuthProvider>
         <SubscriptionProvider>
           <ToastProvider>
@@ -200,6 +214,7 @@ export default function App() {
           </ToastProvider>
         </SubscriptionProvider>
       </AuthProvider>
+      </QueryClientProvider>
     </SafeAreaProvider>
   );
 }

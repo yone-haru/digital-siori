@@ -1,11 +1,12 @@
 import React, { useState, useCallback, useMemo, useEffect, useRef } from 'react';
 import {
-  View, Text, ScrollView, TouchableOpacity, StyleSheet,
+  View, Text, ScrollView, FlatList, TouchableOpacity, StyleSheet,
   Image, RefreshControl, ActivityIndicator, useWindowDimensions, Alert, Animated, BackHandler,
 } from 'react-native';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useNavigation, useFocusEffect } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import Svg, { Path, Circle } from 'react-native-svg';
 import { supabase } from '../lib/supabase';
 import { useAuth } from '../contexts/AuthContext';
@@ -14,6 +15,7 @@ import { C, F } from '../lib/colors';
 import { bookColor } from '../lib/utils';
 import { pendingDelete } from '../lib/pendingDelete';
 import { getActiveSession, clearActiveSession, type ActiveSession } from '../lib/activeSession';
+import { fetchShelf, queryKeys, type ShelfBook, type ShelfData } from '../data/queries';
 import { BottomSheet } from '../components/BottomSheet';
 import { BookCover } from '../components/BookCover';
 import type { BookStatus } from '../types';
@@ -21,12 +23,6 @@ import type { RootStackParamList } from '../types/navigation';
 
 type Nav = NativeStackNavigationProp<RootStackParamList>;
 
-type Book = {
-  id: string; title: string; author: string; cover_url: string | null;
-  current_page: number; total_pages: number; status: BookStatus;
-  created_at: string; updated_at: string; tagIds: string[];
-  rating: number | null;
-};
 type Tag = { id: string; name: string };
 type FilterTab = 'all' | BookStatus;
 type SortKey = 'updated_at' | 'created_at' | 'title' | 'rating';
@@ -56,17 +52,19 @@ const SECTIONS: { status: BookStatus; label: string }[] = [
 const H_PAD = 28;
 const CARD_GAP = 8;
 
+/** FlatList の仮想化単位。セクション見出し or 3冊ぶんの行 */
+type ListItem =
+  | { type: 'section'; key: string; label: string; count: number }
+  | { type: 'row'; key: string; books: ShelfBook[] };
+
 export default function ShelfScreen() {
   const nav = useNavigation<Nav>();
   const { user } = useAuth();
+  const queryClient = useQueryClient();
   const { width: screenWidth } = useWindowDimensions();
   const insets = useSafeAreaInsets();
   const cardW = Math.floor((screenWidth - H_PAD * 2 - CARD_GAP * 2) / 3);
 
-  const [books, setBooks] = useState<Book[]>([]);
-  const [tags, setTags] = useState<Tag[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [loadError, setLoadError] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
   const [filter, setFilter] = useState<FilterTab>('all');
   const [sortKey, setSortKey] = useState<SortKey>('updated_at');
@@ -80,45 +78,32 @@ export default function ShelfScreen() {
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [tagSheetOpen, setTagSheetOpen] = useState(false);
 
-  const fetchData = useCallback(async () => {
-    if (!user) return;
-    const [bRes, btRes, tagRes] = await Promise.all([
-      supabase.from('books')
-        .select('id,title,author,cover_url,current_page,total_pages,status,created_at,updated_at,rating')
-        .order('updated_at', { ascending: false }),
-      supabase.from('book_tags').select('book_id,tag_id'),
-      supabase.from('tags').select('id,name').eq('user_id', user.id).order('created_at'),
-    ]);
-    if (bRes.error || btRes.error || tagRes.error) {
-      // 失敗時は前回のデータを保持し、空状態と区別する
-      setLoadError(true);
-      return;
-    }
-    setLoadError(false);
-    const tagMap: Record<string, string[]> = {};
-    for (const r of btRes.data ?? []) {
-      tagMap[r.book_id] = [...(tagMap[r.book_id] ?? []), r.tag_id];
-    }
-    setBooks((bRes.data ?? []).map((b) => ({ ...b, tagIds: tagMap[b.id] ?? [] })));
-    setTags(tagRes.data ?? []);
-  }, [user]);
+  const shelfKey = queryKeys.shelf(user?.id ?? '');
+  const { data, isLoading, isError, refetch } = useQuery({
+    queryKey: shelfKey,
+    queryFn: () => fetchShelf(user!.id),
+    enabled: !!user,
+  });
+  const books = data?.books;
+  const tags: Tag[] = data?.tags ?? [];
 
   useFocusEffect(useCallback(() => {
     const pending = pendingDelete.get();
     setDeletedBook(pending);
     // 強制終了などで残った読書セッションがあれば復元を提案する
     getActiveSession().then(setRecoverSession);
-    fetchData().finally(() => setLoading(false));
-  }, [fetchData]));
+    // キャッシュを表示しつつ裏で再取得（stale-while-revalidate）
+    queryClient.invalidateQueries({ queryKey: ['shelf'] });
+  }, [queryClient]));
 
   const onRefresh = useCallback(async () => {
     setRefreshing(true);
-    await fetchData();
+    await refetch();
     setRefreshing(false);
-  }, [fetchData]);
+  }, [refetch]);
 
   const visibleBooks = useMemo(
-    () => deletedBook ? books.filter((b) => b.id !== deletedBook.bookId) : books,
+    () => deletedBook ? (books ?? []).filter((b) => b.id !== deletedBook.bookId) : (books ?? []),
     [books, deletedBook],
   );
 
@@ -147,6 +132,27 @@ export default function ShelfScreen() {
       return new Date(b[sortKey]).getTime() - new Date(a[sortKey]).getTime();
     });
   }, [visibleBooks, filter, sortKey, tagFilter]);
+
+  const listData = useMemo<ListItem[]>(() => {
+    const items: ListItem[] = [];
+    const pushRows = (group: ShelfBook[]) => {
+      for (let i = 0; i < group.length; i += 3) {
+        const row = group.slice(i, i + 3);
+        items.push({ type: 'row', key: `r-${row[0].id}`, books: row });
+      }
+    };
+    if (filter === 'all') {
+      for (const { status, label } of SECTIONS) {
+        const group = sorted.filter((b) => b.status === status);
+        if (!group.length) continue;
+        items.push({ type: 'section', key: `s-${status}`, label, count: group.length });
+        pushRows(group);
+      }
+    } else {
+      pushRows(sorted);
+    }
+    return items;
+  }, [sorted, filter]);
 
   // 選択モード中は戻るジェスチャー/ボタンでキャンセル
   useEffect(() => {
@@ -191,7 +197,8 @@ export default function ShelfScreen() {
               showToast('削除に失敗しました。通信環境を確認してください', 'error');
               return;
             }
-            setBooks((prev) => prev.filter((b) => !selectedIds.has(b.id)));
+            queryClient.setQueryData<ShelfData>(shelfKey, (old) =>
+              old ? { ...old, books: old.books.filter((b) => !selectedIds.has(b.id)) } : old);
             exitSelectionMode();
           },
         },
@@ -207,11 +214,15 @@ export default function ShelfScreen() {
       showToast('タグ付けに失敗しました', 'error');
       return;
     }
-    setBooks((prev) => prev.map((b) =>
-      selectedIds.has(b.id) && !b.tagIds.includes(tagId)
-        ? { ...b, tagIds: [...b.tagIds, tagId] }
-        : b,
-    ));
+    queryClient.setQueryData<ShelfData>(shelfKey, (old) =>
+      old ? {
+        ...old,
+        books: old.books.map((b) =>
+          selectedIds.has(b.id) && !b.tagIds.includes(tagId)
+            ? { ...b, tagIds: [...b.tagIds, tagId] }
+            : b,
+        ),
+      } : old);
     setTagSheetOpen(false);
     exitSelectionMode();
     showToast(`${ids.length}冊にタグを追加しました`);
@@ -228,7 +239,34 @@ export default function ShelfScreen() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectionMode]);
 
-  if (loading) {
+  const renderItem = useCallback(({ item }: { item: ListItem }) => {
+    if (item.type === 'section') {
+      return (
+        <View style={s.sectionHead}>
+          <Text style={s.sectionLabel}>{item.label}</Text>
+          <Text style={s.sectionCount}>— {item.count}</Text>
+        </View>
+      );
+    }
+    return (
+      <View style={s.gridRow}>
+        {item.books.map((b) => (
+          <BookCard
+            key={b.id} book={b} cardW={cardW}
+            onPress={handleCardPress}
+            onLongPress={handleCardLongPress}
+            selectionMode={selectionMode}
+            selected={selectedIds.has(b.id)}
+          />
+        ))}
+        {item.books.length < 3 && Array(3 - item.books.length).fill(null).map((_, i) => (
+          <View key={i} style={{ width: cardW }} />
+        ))}
+      </View>
+    );
+  }, [cardW, handleCardPress, handleCardLongPress, selectionMode, selectedIds]);
+
+  if (isLoading) {
     return (
       <SafeAreaView style={s.container} edges={['top']}>
         <ActivityIndicator color={C.ink} style={{ flex: 1 }} />
@@ -238,6 +276,111 @@ export default function ShelfScreen() {
 
   const initial = (user?.email ?? '?')[0].toUpperCase();
   const avatarUrl = user?.user_metadata?.avatar_url as string | undefined;
+  const continuePct = continueBook && continueBook.total_pages > 0
+    ? Math.min(100, Math.round((continueBook.current_page / continueBook.total_pages) * 100))
+    : null;
+
+  const listHeader = (
+    <>
+      {/* 続きから再開（最重要動作を1タップに） */}
+      {continueBook && !selectionMode && (
+        <TouchableOpacity
+          style={s.continueCard}
+          activeOpacity={0.85}
+          onPress={() => nav.navigate('ReadingTimer', {
+            bookId: continueBook.id,
+            bookTitle: continueBook.title,
+            bookAuthor: continueBook.author,
+            startPage: continueBook.current_page,
+            totalPages: continueBook.total_pages,
+          })}
+        >
+          <BookCover title={continueBook.title} coverUrl={continueBook.cover_url} width={40} height={58} />
+          <View style={{ flex: 1 }}>
+            <Text style={s.continueLabel}>Continue Reading</Text>
+            <Text style={s.continueTitle} numberOfLines={1}>{continueBook.title}</Text>
+            <Text style={s.continuePage}>p.{continueBook.current_page} から再開</Text>
+            {continuePct !== null && (
+              <View style={s.continueProg}>
+                <View style={[s.continueProgFill, { width: `${continuePct}%` as any }]} />
+              </View>
+            )}
+          </View>
+          <View style={s.continuePlay}>
+            <Svg width="12" height="12" viewBox="0 0 12 12" fill="none">
+              <Path d="M3 2l7 4-7 4V2z" fill={C.paper} />
+            </Svg>
+          </View>
+        </TouchableOpacity>
+      )}
+
+      {/* Filter tabs */}
+      <ScrollView horizontal showsHorizontalScrollIndicator={false}
+        style={{ paddingTop: 16 }} contentContainerStyle={{ paddingHorizontal: H_PAD, gap: CARD_GAP }}>
+        {FILTERS.map((tab) => {
+          const active = filter === tab.key;
+          return (
+            <TouchableOpacity key={tab.key}
+              style={[s.filterTab, active && s.filterTabActive]}
+              onPress={() => setFilter(tab.key)} activeOpacity={0.7}>
+              <Text style={[s.filterTabText, active && s.filterTabTextActive]}>{tab.label}</Text>
+              <Text style={[s.filterTabCount, active && s.filterTabCountActive]}>
+                {counts[tab.key] ?? 0}
+              </Text>
+            </TouchableOpacity>
+          );
+        })}
+      </ScrollView>
+
+      {/* Tag filter */}
+      {tags.length > 0 && (
+        <View style={{ paddingHorizontal: H_PAD, paddingTop: 12 }}>
+          <Text style={s.tagFilterLabel}>タグで絞り込む</Text>
+          <ScrollView horizontal showsHorizontalScrollIndicator={false}
+            contentContainerStyle={{ gap: CARD_GAP, paddingTop: 8 }}>
+            {tags.map((tag) => {
+              const active = tagFilter === tag.id;
+              return (
+                <TouchableOpacity key={tag.id}
+                  style={[s.tagPill, active && s.tagPillActive]}
+                  onPress={() => setTagFilter(active ? null : tag.id)} activeOpacity={0.7}>
+                  <Text style={[s.tagPillText, active && s.tagPillTextActive]}>{tag.name}</Text>
+                </TouchableOpacity>
+              );
+            })}
+          </ScrollView>
+        </View>
+      )}
+
+      {/* Sort */}
+      <View style={s.sortRow}>
+        {SORTS.map((opt) => (
+          <TouchableOpacity key={opt.key} onPress={() => setSortKey(opt.key)} hitSlop={10}>
+            <Text style={[s.sortOpt, sortKey === opt.key && s.sortOptActive]}>{opt.label}</Text>
+          </TouchableOpacity>
+        ))}
+      </View>
+    </>
+  );
+
+  const listEmpty = visibleBooks.length === 0 ? (
+    isError ? (
+      <View style={s.empty}>
+        <Text style={s.emptyTitle}>読み込みに失敗しました</Text>
+        <Text style={s.emptySub}>通信環境を確認して、下に引っ張って再読み込みしてください</Text>
+      </View>
+    ) : (
+      <View style={s.empty}>
+        <Text style={s.emptyTitle}>本棚はまだ空です</Text>
+        <Text style={s.emptySub}>下の + ボタンから本を追加してください</Text>
+      </View>
+    )
+  ) : (
+    // 本はあるがフィルタ/タグ絞り込みで0件
+    <View style={s.empty}>
+      <Text style={s.emptySub}>該当する本がありません</Text>
+    </View>
+  );
 
   return (
     <SafeAreaView style={s.container} edges={['top']}>
@@ -250,6 +393,7 @@ export default function ShelfScreen() {
           style={s.avatar}
           onPress={() => nav.navigate('Account')}
           activeOpacity={0.7}
+          hitSlop={8}
         >
           {avatarUrl
             ? <Image source={{ uri: avatarUrl }} style={s.avatarImg} />
@@ -257,134 +401,17 @@ export default function ShelfScreen() {
         </TouchableOpacity>
       </View>
 
-      <ScrollView
+      <FlatList
+        data={listData}
+        keyExtractor={(item) => item.key}
+        renderItem={renderItem}
+        ListHeaderComponent={listHeader}
+        ListEmptyComponent={listEmpty}
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={C.muted} />}
         showsVerticalScrollIndicator={false}
         style={{ flex: 1 }}
-      >
-        {/* 続きから再開（最重要動作を1タップに） */}
-        {continueBook && !selectionMode && (
-          <TouchableOpacity
-            style={s.continueCard}
-            activeOpacity={0.85}
-            onPress={() => nav.navigate('ReadingTimer', {
-              bookId: continueBook.id,
-              bookTitle: continueBook.title,
-              bookAuthor: continueBook.author,
-              startPage: continueBook.current_page,
-              totalPages: continueBook.total_pages,
-            })}
-          >
-            <BookCover title={continueBook.title} coverUrl={continueBook.cover_url} width={40} height={58} />
-            <View style={{ flex: 1 }}>
-              <Text style={s.continueLabel}>Continue Reading</Text>
-              <Text style={s.continueTitle} numberOfLines={1}>{continueBook.title}</Text>
-              <Text style={s.continuePage}>p.{continueBook.current_page} から再開</Text>
-            </View>
-            <View style={s.continuePlay}>
-              <Svg width="12" height="12" viewBox="0 0 12 12" fill="none">
-                <Path d="M3 2l7 4-7 4V2z" fill={C.paper} />
-              </Svg>
-            </View>
-          </TouchableOpacity>
-        )}
-
-        {/* Filter tabs */}
-        <ScrollView horizontal showsHorizontalScrollIndicator={false}
-          style={{ paddingTop: 16 }} contentContainerStyle={{ paddingHorizontal: H_PAD, gap: CARD_GAP }}>
-          {FILTERS.map((tab) => {
-            const active = filter === tab.key;
-            return (
-              <TouchableOpacity key={tab.key}
-                style={[s.filterTab, active && s.filterTabActive]}
-                onPress={() => setFilter(tab.key)} activeOpacity={0.7}>
-                <Text style={[s.filterTabText, active && s.filterTabTextActive]}>{tab.label}</Text>
-                <Text style={[s.filterTabCount, active && s.filterTabCountActive]}>
-                  {counts[tab.key] ?? 0}
-                </Text>
-              </TouchableOpacity>
-            );
-          })}
-        </ScrollView>
-
-        {/* Tag filter */}
-        {tags.length > 0 && (
-          <View style={{ paddingHorizontal: H_PAD, paddingTop: 12 }}>
-            <Text style={s.tagFilterLabel}>タグで絞り込む</Text>
-            <ScrollView horizontal showsHorizontalScrollIndicator={false}
-              contentContainerStyle={{ gap: CARD_GAP, paddingTop: 8 }}>
-              {tags.map((tag) => {
-                const active = tagFilter === tag.id;
-                return (
-                  <TouchableOpacity key={tag.id}
-                    style={[s.tagPill, active && s.tagPillActive]}
-                    onPress={() => setTagFilter(active ? null : tag.id)} activeOpacity={0.7}>
-                    <Text style={[s.tagPillText, active && s.tagPillTextActive]}>{tag.name}</Text>
-                  </TouchableOpacity>
-                );
-              })}
-            </ScrollView>
-          </View>
-        )}
-
-        {/* Sort */}
-        <View style={s.sortRow}>
-          {SORTS.map((opt) => (
-            <TouchableOpacity key={opt.key} onPress={() => setSortKey(opt.key)} hitSlop={10}>
-              <Text style={[s.sortOpt, sortKey === opt.key && s.sortOptActive]}>{opt.label}</Text>
-            </TouchableOpacity>
-          ))}
-        </View>
-
-        {/* Books */}
-        {visibleBooks.length === 0 ? (
-          loadError ? (
-            <View style={s.empty}>
-              <Text style={s.emptyTitle}>読み込みに失敗しました</Text>
-              <Text style={s.emptySub}>通信環境を確認して、下に引っ張って再読み込みしてください</Text>
-            </View>
-          ) : (
-            <View style={s.empty}>
-              <Text style={s.emptyTitle}>本棚はまだ空です</Text>
-              <Text style={s.emptySub}>下の + ボタンから本を追加してください</Text>
-            </View>
-          )
-        ) : filter === 'all' ? (
-          SECTIONS.map(({ status, label }) => {
-            const group = sorted.filter((b) => b.status === status);
-            if (!group.length) return null;
-            return (
-              <View key={status} style={s.section}>
-                <View style={s.sectionHead}>
-                  <Text style={s.sectionLabel}>{label}</Text>
-                  <Text style={s.sectionCount}>— {group.length}</Text>
-                </View>
-                <BooksGrid
-                  books={group}
-                  cardW={cardW}
-                  selectionMode={selectionMode}
-                  selectedIds={selectedIds}
-                  onPress={handleCardPress}
-                  onLongPress={handleCardLongPress}
-                />
-              </View>
-            );
-          })
-        ) : (
-          <View style={[s.section, { paddingTop: 8 }]}>
-            <BooksGrid
-              books={sorted}
-              cardW={cardW}
-              selectionMode={selectionMode}
-              selectedIds={selectedIds}
-              onPress={handleCardPress}
-              onLongPress={handleCardLongPress}
-            />
-          </View>
-        )}
-
-        <View style={{ height: 32 }} />
-      </ScrollView>
+        contentContainerStyle={{ paddingBottom: 32 }}
+      />
 
       {/* 選択モード アクションバー */}
       {selectionMode && (
@@ -442,14 +469,18 @@ export default function ShelfScreen() {
       {deletedBook && (
         <UndoToast
           title={deletedBook.bookTitle}
-          bottom={49 + insets.bottom + 12}
+          bottom={60 + insets.bottom + 12}
           onTimeout={async () => {
-            const { error } = await supabase.from('books').delete().eq('id', deletedBook.bookId);
+            const target = deletedBook;
+            const { error } = await supabase.from('books').delete().eq('id', target.bookId);
             pendingDelete.clear();
             setDeletedBook(null);
             if (error) {
               // 削除失敗時は本がリストに戻るので、その旨を伝える
               showToast('削除に失敗したため、本を元に戻しました', 'error');
+            } else {
+              queryClient.setQueryData<ShelfData>(shelfKey, (old) =>
+                old ? { ...old, books: old.books.filter((b) => b.id !== target.bookId) } : old);
             }
           }}
           onUndo={() => {
@@ -528,42 +559,11 @@ function UndoToast({
   );
 }
 
-function BooksGrid({
-  books, cardW, onPress, onLongPress, selectionMode, selectedIds,
-}: {
-  books: Book[]; cardW: number;
-  onPress: (id: string) => void; onLongPress: (id: string) => void;
-  selectionMode: boolean; selectedIds: Set<string>;
-}) {
-  const rows: Book[][] = [];
-  for (let i = 0; i < books.length; i += 3) rows.push(books.slice(i, i + 3));
-  return (
-    <View>
-      {rows.map((row, ri) => (
-        <View key={ri} style={[s.row, { gap: CARD_GAP }]}>
-          {row.map((b) => (
-            <BookCard
-              key={b.id} book={b} cardW={cardW}
-              onPress={onPress}
-              onLongPress={onLongPress}
-              selectionMode={selectionMode}
-              selected={selectedIds.has(b.id)}
-            />
-          ))}
-          {row.length < 3 && Array(3 - row.length).fill(null).map((_, i) => (
-            <View key={i} style={{ width: cardW }} />
-          ))}
-        </View>
-      ))}
-    </View>
-  );
-}
-
 // 選択モードのトグルで全カードが再レンダーされないよう memo 化している
 const BookCard = React.memo(function BookCard({
   book, cardW, onPress, onLongPress, selectionMode, selected,
 }: {
-  book: Book; cardW: number;
+  book: ShelfBook; cardW: number;
   onPress: (id: string) => void; onLongPress: (id: string) => void;
   selectionMode: boolean; selected: boolean;
 }) {
@@ -700,6 +700,8 @@ const s = StyleSheet.create({
   },
   continueTitle: { fontFamily: F.shippori, fontSize: 15, color: C.ink, marginBottom: 2 },
   continuePage: { fontFamily: F.zen, fontSize: 11, color: C.muted },
+  continueProg: { height: 2, backgroundColor: C.line, borderRadius: 1, marginTop: 8 },
+  continueProgFill: { height: 2, backgroundColor: C.ink, borderRadius: 1 },
   continuePlay: {
     width: 36, height: 36, borderRadius: 18, backgroundColor: C.ink,
     alignItems: 'center', justifyContent: 'center',
@@ -734,11 +736,13 @@ const s = StyleSheet.create({
   empty: { alignItems: 'center', justifyContent: 'center', paddingVertical: 64, paddingHorizontal: H_PAD },
   emptyTitle: { fontFamily: F.shippori, fontSize: 22, color: C.ink2, marginBottom: 8 },
   emptySub: { fontFamily: F.zen, fontSize: 13, color: C.muted, textAlign: 'center' },
-  section: { paddingHorizontal: H_PAD, marginBottom: 24 },
-  sectionHead: { flexDirection: 'row', alignItems: 'center', gap: 10, marginBottom: 16 },
+  sectionHead: {
+    flexDirection: 'row', alignItems: 'center', gap: 10,
+    paddingHorizontal: H_PAD, paddingTop: 12, marginBottom: 16,
+  },
   sectionLabel: { fontFamily: F.zen, fontSize: 10, letterSpacing: 2.5, color: C.muted, textTransform: 'uppercase' },
   sectionCount: { fontFamily: F.cormorant, fontSize: 13, color: C.muted2 },
-  row: { flexDirection: 'row', marginBottom: 0 },
+  gridRow: { flexDirection: 'row', gap: CARD_GAP, paddingHorizontal: H_PAD },
   cover: {
     borderRadius: 1, overflow: 'hidden',
     shadowColor: '#000', shadowOffset: { width: 1, height: 2 },
