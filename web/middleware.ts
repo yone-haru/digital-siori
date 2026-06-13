@@ -33,7 +33,7 @@ export async function middleware(request: NextRequest) {
 
   const { pathname } = request.nextUrl;
   const isAuthRoute = pathname.startsWith("/auth");
-  const isPublicRoute = pathname.startsWith("/privacy");
+  const isPublicRoute = pathname.startsWith("/privacy") || pathname.startsWith("/delete-account");
 
   if (!user && !isAuthRoute && !isPublicRoute) {
     return NextResponse.redirect(new URL("/auth/login", request.url));
