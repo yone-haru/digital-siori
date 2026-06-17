@@ -8,7 +8,7 @@ import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { supabase } from '../lib/supabase';
 import { C, F } from '../lib/colors';
 import type { AuthStackParamList } from '../types/navigation';
-import { BookmarkLogo } from '../components/BookmarkLogo';
+import { YondleLogo } from '../components/YondleLogo';
 
 type Props = { navigation: NativeStackNavigationProp<AuthStackParamList, 'Signup'> };
 
@@ -61,7 +61,11 @@ export default function SignupScreen({ navigation }: Props) {
       return;
     }
     setLoading(true);
-    const { error: err } = await supabase.auth.signUp({ email: email.trim(), password });
+    const { error: err } = await supabase.auth.signUp({
+      email: email.trim(),
+      password,
+      options: { emailRedirectTo: 'yondle://signup-complete' },
+    });
     if (err) {
       setError(parseError(err.message));
     } else {
@@ -74,7 +78,7 @@ export default function SignupScreen({ navigation }: Props) {
     return (
       <SafeAreaView style={s.container}>
         <View style={s.sentContainer}>
-          <BookmarkLogo />
+          <YondleLogo />
           <View style={s.sentBox}>
             <Text style={s.sentTitle}>メールを送信しました</Text>
             <Text style={s.sentBody}>
@@ -100,7 +104,7 @@ export default function SignupScreen({ navigation }: Props) {
           keyboardShouldPersistTaps="handled"
         >
           <View style={s.logoArea}>
-            <BookmarkLogo />
+            <YondleLogo />
           </View>
 
           <View style={s.formArea}>

@@ -28,7 +28,7 @@
         "appleTeamId": "YOUR_APPLE_TEAM_ID"
       },
       "android": {
-        "serviceAccountKeyPath": "./digitalshiori-75cef2ead53c.json",
+        "serviceAccountKeyPath": "./yondle-75cef2ead53c.json",
         "track": "internal"
       }
     }

@@ -7,7 +7,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { supabase } from '../lib/supabase';
 import { useAuth } from '../contexts/AuthContext';
 import { C, F } from '../lib/colors';
-import { BookmarkLogo } from '../components/BookmarkLogo';
+import { YondleLogo } from '../components/YondleLogo';
 
 export default function ResetPasswordScreen() {
   const { clearRecovery } = useAuth();
@@ -45,7 +45,7 @@ export default function ResetPasswordScreen() {
           keyboardShouldPersistTaps="handled"
         >
           <View style={s.logoArea}>
-            <BookmarkLogo />
+            <YondleLogo />
           </View>
 
           <View style={s.formArea}>

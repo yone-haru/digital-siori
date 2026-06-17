@@ -136,7 +136,7 @@ export default function AccountScreen({ navigation }: Props) {
 
   async function handleSendPasswordReset() {
     if (!email) return;
-    await supabase.auth.resetPasswordForEmail(email, { redirectTo: 'digitalshiori://reset-password' });
+    await supabase.auth.resetPasswordForEmail(email, { redirectTo: 'yondle://reset-password' });
     setPwSheetOpen(false);
     setCurrentPassword(''); setNewPassword(''); setConfirmPassword('');
     Alert.alert('メールを送信しました', 'パスワード再設定用のリンクをメールアドレスに送りました。');

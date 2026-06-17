@@ -41,7 +41,7 @@ if (!SUPABASE_URL || !SUPABASE_ANON_KEY || !SERVICE_ROLE_KEY) {
   process.exit(1);
 }
 
-const TEST_EMAIL    = process.env.SEED_TEST_EMAIL    ?? 'demo@digitalshiori.app';
+const TEST_EMAIL    = process.env.SEED_TEST_EMAIL    ?? 'demo@yondle.app';
 const TEST_PASSWORD = process.env.SEED_TEST_PASSWORD ?? 'Demo1234!';
 
 // admin クライアント（メール確認をスキップしてユーザー作成するため）

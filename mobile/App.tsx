@@ -73,6 +73,26 @@ function StatsIcon({ color }: { color: string }) {
   );
 }
 
+function LinkingHandler() {
+  const { markEmailVerified } = useAuth();
+
+  useEffect(() => {
+    async function handleUrl(url: string) {
+      const isSignupConfirm = url.includes('signup-complete');
+      try { await supabase.auth.exchangeCodeForSession(url); } catch {}
+      if (isSignupConfirm) {
+        const { data } = await supabase.auth.getSession();
+        if (!data.session) markEmailVerified();
+      }
+    }
+    Linking.getInitialURL().then(url => { if (url) handleUrl(url); });
+    const sub = Linking.addEventListener('url', ({ url }) => handleUrl(url));
+    return () => sub.remove();
+  }, [markEmailVerified]);
+
+  return null;
+}
+
 function AuthNavigator() {
   return (
     <AuthStack.Navigator screenOptions={{ headerShown: false, gestureEnabled: true }}>
@@ -166,14 +186,6 @@ function RootNavigator() {
 }
 
 export default function App() {
-  useEffect(() => {
-    async function handleUrl(url: string) {
-      try { await supabase.auth.exchangeCodeForSession(url); } catch {}
-    }
-    Linking.getInitialURL().then(url => { if (url) handleUrl(url); });
-    const sub = Linking.addEventListener('url', ({ url }) => handleUrl(url));
-    return () => sub.remove();
-  }, []);
 
   // バックグラウンド復帰時に React Query の refetch を発火させる
   useEffect(() => {
@@ -206,6 +218,7 @@ export default function App() {
       <AuthProvider>
         <SubscriptionProvider>
           <ToastProvider>
+            <LinkingHandler />
             <NavigationContainer>
               <RootNavigator />
             </NavigationContainer>

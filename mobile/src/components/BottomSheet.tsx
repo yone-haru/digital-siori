@@ -64,7 +64,7 @@ export function BottomSheet({ visible, onClose, children, sheetStyle, disableClo
   function makePanConfig(immediate: boolean) {
     return PanResponder.create({
       onStartShouldSetPanResponder: () => immediate && !state.current.disableClose,
-      onMoveShouldSetPanResponder: (_, { dy }) => !state.current.disableClose && dy > (immediate ? 3 : 15),
+      onMoveShouldSetPanResponder: (_, { dy }) => !state.current.disableClose && dy > (immediate ? 1 : 4),
       onPanResponderMove: (_, { dy }) => {
         if (!state.current.disableClose && dy > 0) translateY.setValue(dy);
       },
@@ -105,6 +105,6 @@ export function BottomSheet({ visible, onClose, children, sheetStyle, disableClo
 const bs = StyleSheet.create({
   overlay: { ...StyleSheet.absoluteFillObject, backgroundColor: 'rgba(0,0,0,0.5)' },
   sheetBase: { position: 'absolute', bottom: 0, left: 0, right: 0 },
-  handleArea: { alignItems: 'center', paddingTop: 12, paddingBottom: 24, marginBottom: 8 },
-  handle: { width: 40, height: 3, backgroundColor: C.line, borderRadius: 2 },
+  handleArea: { alignItems: 'center', paddingTop: 16, paddingBottom: 28, marginBottom: 4 },
+  handle: { width: 48, height: 4, backgroundColor: C.muted2, borderRadius: 2 },
 });

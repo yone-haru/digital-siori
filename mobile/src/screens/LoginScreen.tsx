@@ -8,12 +8,14 @@ import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { supabase } from '../lib/supabase';
 import { C, F } from '../lib/colors';
 import type { AuthStackParamList } from '../types/navigation';
-import { BookmarkLogo } from '../components/BookmarkLogo';
+import { useAuth } from '../contexts/AuthContext';
+import { YondleLogo } from '../components/YondleLogo';
 import { BottomSheet } from '../components/BottomSheet';
 
 type Props = { navigation: NativeStackNavigationProp<AuthStackParamList, 'Login'> };
 
 export default function LoginScreen({ navigation }: Props) {
+  const { emailJustVerified, clearEmailVerified } = useAuth();
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [loading, setLoading] = useState(false);
@@ -22,6 +24,10 @@ export default function LoginScreen({ navigation }: Props) {
   const [resetEmail, setResetEmail] = useState('');
   const [sendingReset, setSendingReset] = useState(false);
   const [resetSent, setResetSent] = useState(false);
+
+  useEffect(() => {
+    return () => { clearEmailVerified(); };
+  }, [clearEmailVerified]);
 
   async function handleLogin() {
     if (!email.trim() || !password) return;
@@ -42,7 +48,7 @@ export default function LoginScreen({ navigation }: Props) {
     const trimmed = resetEmail.trim();
     if (!trimmed) return;
     setSendingReset(true);
-    await supabase.auth.resetPasswordForEmail(trimmed, { redirectTo: 'digitalshiori://reset-password' });
+    await supabase.auth.resetPasswordForEmail(trimmed, { redirectTo: 'yondle://reset-password' });
     setSendingReset(false);
     setResetSent(true);
   }
@@ -56,8 +62,15 @@ export default function LoginScreen({ navigation }: Props) {
           keyboardShouldPersistTaps="handled"
         >
           <View style={s.logoArea}>
-            <BookmarkLogo />
+            <YondleLogo />
           </View>
+
+          {emailJustVerified && (
+            <View style={s.verifiedBanner}>
+              <Text style={s.verifiedText}>登録が完了しました</Text>
+              <Text style={s.verifiedSub}>メールアドレスとパスワードでログインしてください。</Text>
+            </View>
+          )}
 
           <View style={s.formArea}>
             <Text style={s.welcomeLabel}>Welcome</Text>
@@ -203,6 +216,21 @@ const s = StyleSheet.create({
   },
   forgotRow: { alignSelf: 'flex-end', marginBottom: 32 },
   forgotLink: { fontFamily: F.zen, fontSize: 11, color: C.muted2, textDecorationLine: 'underline' },
+  verifiedBanner: {
+    marginTop: 12,
+    marginBottom: 4,
+    paddingHorizontal: 16,
+    paddingVertical: 14,
+    borderLeftWidth: 2,
+    borderLeftColor: C.ink,
+    backgroundColor: C.bg,
+  },
+  verifiedText: {
+    fontFamily: F.shippori, fontSize: 15, color: C.ink, marginBottom: 4,
+  },
+  verifiedSub: {
+    fontFamily: F.zen, fontSize: 11, color: C.muted, lineHeight: 17,
+  },
 });
 
 const rs = StyleSheet.create({
