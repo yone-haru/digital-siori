@@ -39,6 +39,7 @@ yarn-error.*
 # sensitive credential files
 google-service-account.json
 yondle-*.json
+digitalshiori-*.json
 
 # typescript
 *.tsbuildinfo
