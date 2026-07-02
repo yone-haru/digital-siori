@@ -3,6 +3,7 @@ import { AuthProvider } from "@/components/providers/auth-provider";
 import "./globals.css";
 
 export const metadata: Metadata = {
+  metadataBase: new URL("https://digital-siori.vercel.app"),
   title: "デジタル栞",
   description: "紙の本の読書進捗を記録するデジタル本棚アプリ",
   appleWebApp: {
