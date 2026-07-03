@@ -226,3 +226,69 @@ export async function initBookRead(
   revalidatePath("/shelf");
   return { success: true };
 }
+
+/* ── 本メモ（book_memos） ── */
+type BookMemoResult =
+  | { error: string }
+  | { success: true; memo: { id: string; page_number: number; content: string; created_at: string } };
+
+export async function addBookMemo(
+  bookId: string,
+  data: { pageNumber: number; content: string }
+): Promise<BookMemoResult> {
+  const content = data.content.trim();
+  if (!content) return { error: "メモを入力してください" };
+
+  const supabase = await createServerClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) return { error: "ログインが必要です" };
+
+  const { data: memo, error } = await supabase
+    .from("book_memos")
+    .insert({
+      book_id: bookId,
+      user_id: user.id,
+      page_number: data.pageNumber,
+      content,
+    })
+    .select("id, page_number, content, created_at")
+    .single();
+
+  if (error || !memo) return { error: "メモの保存に失敗しました" };
+
+  revalidatePath(`/books/${bookId}`);
+  return { success: true, memo };
+}
+
+export async function updateBookMemo(
+  memoId: string,
+  bookId: string,
+  data: { pageNumber: number; content: string }
+): Promise<{ error: string } | { success: true }> {
+  const content = data.content.trim();
+  if (!content) return { error: "メモを入力してください" };
+
+  const supabase = await createServerClient();
+  const { error } = await supabase
+    .from("book_memos")
+    .update({ page_number: data.pageNumber, content })
+    .eq("id", memoId);
+
+  if (error) return { error: "メモの更新に失敗しました" };
+  revalidatePath(`/books/${bookId}`);
+  return { success: true };
+}
+
+export async function deleteBookMemo(
+  memoId: string,
+  bookId: string
+): Promise<{ error: string } | { success: true }> {
+  const supabase = await createServerClient();
+  const { error } = await supabase.from("book_memos").delete().eq("id", memoId);
+
+  if (error) return { error: "メモの削除に失敗しました" };
+  revalidatePath(`/books/${bookId}`);
+  return { success: true };
+}

@@ -19,6 +19,18 @@ export async function updateDisplayName(name: string) {
   return { success: true };
 }
 
+export async function updatePassword(password: string) {
+  if (password.length < 6) {
+    return { error: "パスワードは6文字以上で設定してください。" };
+  }
+
+  const supabase = await createServerClient();
+  const { error } = await supabase.auth.updateUser({ password });
+
+  if (error) return { error: "パスワードの変更に失敗しました。もう一度お試しください。" };
+  return { success: true };
+}
+
 export async function deleteAccount() {
   const supabase = await createServerClient();
   const {

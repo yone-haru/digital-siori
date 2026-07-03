@@ -20,12 +20,25 @@ async function addManualBook(
   return addBook({ title, author, total_pages: totalPages });
 }
 
-export function ManualAddForm() {
+export function ManualAddForm({
+  canAdd,
+  onPaywall,
+}: {
+  canAdd: boolean;
+  onPaywall: () => void;
+}) {
   const [state, formAction, isPending] = useActionState(addManualBook, {});
   const [totalPages, setTotalPages] = useState(1);
 
+  function handleSubmit(e: React.FormEvent<HTMLFormElement>) {
+    if (!canAdd) {
+      e.preventDefault();
+      onPaywall();
+    }
+  }
+
   return (
-    <form action={formAction} className="flex flex-col gap-6 pb-8">
+    <form action={formAction} onSubmit={handleSubmit} className="flex flex-col gap-6 pb-8">
       {/* Title */}
       <div>
         <label className="block font-zen text-[10px] tracking-[0.25em] text-muted uppercase mb-2">

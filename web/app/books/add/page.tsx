@@ -12,6 +12,11 @@ export default async function AddBookPage() {
 
   if (!user) redirect("/auth/login");
 
+  // 無料プランの冊数上限チェック用（Pro 判定自体はクライアント側の useSubscription で行う）
+  const { count: bookCount } = await supabase
+    .from("books")
+    .select("id", { count: "exact", head: true });
+
   return (
     <div className="min-h-screen bg-paper flex flex-col">
       {/* Top bar */}
@@ -38,7 +43,7 @@ export default async function AddBookPage() {
 
       {/* Search content */}
       <div className="flex-1 overflow-hidden flex flex-col">
-        <BookSearch />
+        <BookSearch bookCount={bookCount ?? 0} />
       </div>
 
       <BottomNav />

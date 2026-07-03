@@ -6,6 +6,8 @@ import {
   removeTagFromBook,
   createTag,
 } from "@/app/books/[id]/actions";
+import { useSubscription } from "@/components/providers/subscription-provider";
+import { FREE_LIMITS } from "@/lib/limits";
 
 export type Tag = { id: string; name: string };
 
@@ -22,6 +24,7 @@ export function TagPicker({
   const [newName, setNewName] = useState("");
   const [isPending, startTransition] = useTransition();
   const inputRef = useRef<HTMLInputElement>(null);
+  const { isPro, openPaywall } = useSubscription();
 
   const bookTagIds = new Set(bookTags.map((t) => t.id));
   const availableTags = allTags.filter((t) => !bookTagIds.has(t.id));
@@ -43,6 +46,10 @@ export function TagPicker({
     e.preventDefault();
     const name = newName.trim();
     if (!name) return;
+    if (!isPro && allTags.length >= FREE_LIMITS.tags) {
+      openPaywall();
+      return;
+    }
     setNewName("");
     startTransition(async () => {
       await createTag(bookId, name);

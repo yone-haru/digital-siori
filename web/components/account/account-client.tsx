@@ -3,6 +3,8 @@
 import { useState, useTransition, useRef } from "react";
 import Link from "next/link";
 import { logout } from "@/app/auth/actions";
+import { createClient } from "@/lib/supabase/client";
+import { useSubscription } from "@/components/providers/subscription-provider";
 
 const DARK_BG = "#0F0D0A";
 const DARK_CARD = "#16140F";
@@ -46,19 +48,42 @@ function CameraIcon({ color = W_92, size = 16 }: { color?: string; size?: number
   );
 }
 
-function Avatar({ size, color, letter, editable = false }: { size: number; color: string; letter: string; editable?: boolean }) {
+function Avatar({
+  size, color, letter, imageUrl, editable = false, loading = false,
+}: {
+  size: number; color: string; letter: string; imageUrl?: string | null;
+  editable?: boolean; loading?: boolean;
+}) {
   return (
     <div style={{ position: "relative", width: size, height: size }}>
       <div style={{
         width: size, height: size, borderRadius: "50%",
         background: color, display: "flex", alignItems: "center", justifyContent: "center",
-        boxShadow: "0 4px 16px rgba(0,0,0,0.3)",
+        boxShadow: "0 4px 16px rgba(0,0,0,0.3)", overflow: "hidden",
       }}>
-        <span style={{
-          fontFamily: "Cormorant Garamond, Georgia, serif",
-          fontSize: size * 0.42, fontWeight: 300, color: W_92,
-          letterSpacing: "0.02em", lineHeight: 1,
-        }}>{letter}</span>
+        {imageUrl ? (
+          // eslint-disable-next-line @next/next/no-img-element
+          <img src={imageUrl} alt="" style={{ width: "100%", height: "100%", objectFit: "cover" }} />
+        ) : (
+          <span style={{
+            fontFamily: "Cormorant Garamond, Georgia, serif",
+            fontSize: size * 0.42, fontWeight: 300, color: W_92,
+            letterSpacing: "0.02em", lineHeight: 1,
+          }}>{letter}</span>
+        )}
+        {loading && (
+          <div style={{
+            position: "absolute", inset: 0, borderRadius: "50%",
+            background: "rgba(0,0,0,0.45)",
+            display: "flex", alignItems: "center", justifyContent: "center",
+          }}>
+            <div style={{
+              width: size * 0.2, height: size * 0.2, borderRadius: "50%",
+              border: "2px solid rgba(255,255,255,0.9)", borderTopColor: "transparent",
+              animation: "account-avatar-spin 0.8s linear infinite",
+            }} />
+          </div>
+        )}
       </div>
       {editable && (
         <div style={{
@@ -127,26 +152,70 @@ function Row({
 }
 
 export function AccountClient({
+  userId,
   email,
   displayName,
   initial,
   avatarColor,
+  avatarUrl: initialAvatarUrl,
 }: {
+  userId: string;
   email: string;
   displayName: string;
   initial: string;
   avatarColor: string;
+  avatarUrl: string | null;
 }) {
   const [sheetOpen, setSheetOpen] = useState(false);
   const [isPending, startTransition] = useTransition();
+  const [avatarUrl, setAvatarUrl] = useState(initialAvatarUrl);
+  const [uploadingAvatar, setUploadingAvatar] = useState(false);
+  const [avatarError, setAvatarError] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const { isPro, openPaywall } = useSubscription();
 
   function handleLogout() {
     startTransition(() => logout());
   }
 
+  // mobile の AccountScreen (handlePickAvatar) と完全に同じ保存方式:
+  // avatars バケットの `${userId}/avatar.${ext}` に upsert し、
+  // 公開URLを user_metadata.avatar_url に保存する。
+  async function handleAvatarChange(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    e.target.value = ""; // 同じファイルを連続選択できるようにリセット
+    if (!file) return;
+
+    setAvatarError(null);
+    setUploadingAvatar(true);
+    try {
+      const supabase = createClient();
+      const ext = file.name.split(".").pop()?.toLowerCase() ?? "jpg";
+      const mimeType = ext === "png" ? "image/png" : "image/jpeg";
+      const path = `${userId}/avatar.${ext}`;
+
+      const { data, error } = await supabase.storage
+        .from("avatars")
+        .upload(path, file, { contentType: mimeType, upsert: true });
+      if (error || !data) throw new Error(error?.message ?? "upload failed");
+
+      const { data: urlData } = supabase.storage.from("avatars").getPublicUrl(data.path);
+      const url = `${urlData.publicUrl}?t=${Date.now()}`;
+      const { error: updateError } = await supabase.auth.updateUser({ data: { avatar_url: url } });
+      if (updateError) throw new Error(updateError.message);
+
+      setAvatarUrl(url);
+      setSheetOpen(false);
+    } catch {
+      setAvatarError("アイコンの更新に失敗しました。");
+    } finally {
+      setUploadingAvatar(false);
+    }
+  }
+
   return (
     <div style={{ flex: 1, display: "flex", flexDirection: "column", overflow: "hidden" }}>
+      <style>{`@keyframes account-avatar-spin { to { transform: rotate(360deg); } }`}</style>
       {/* Top bar */}
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "12px 28px" }}>
         <Link href="/shelf" style={{ color: W_55, display: "flex" }} aria-label="本棚に戻る">
@@ -165,7 +234,7 @@ export function AccountClient({
         {/* Hero */}
         <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 14, padding: "24px 28px 36px" }}>
           <button onClick={() => setSheetOpen(true)} style={{ background: "none", border: "none", cursor: "pointer", padding: 0 }}>
-            <Avatar size={96} color={avatarColor} letter={initial} editable />
+            <Avatar size={96} color={avatarColor} letter={initial} imageUrl={avatarUrl} editable loading={uploadingAvatar} />
           </button>
           <div style={{ textAlign: "center" }}>
             <div style={{ fontFamily: "Shippori Mincho, serif", fontSize: 22, fontWeight: 600, color: W_92, lineHeight: 1.3, marginBottom: 6, letterSpacing: "0.02em" }}>
@@ -175,6 +244,19 @@ export function AccountClient({
               {email}
             </div>
           </div>
+          {!isPro && (
+            <button
+              onClick={openPaywall}
+              style={{
+                marginTop: 2, padding: "8px 18px", borderRadius: 99,
+                background: W_92, border: "none", cursor: "pointer",
+                fontFamily: "Zen Kaku Gothic New, sans-serif", fontSize: 11,
+                letterSpacing: "0.12em", color: DARK_BG,
+              }}
+            >
+              PRO プランを見る
+            </button>
+          )}
         </div>
 
         {/* Profile */}
@@ -185,7 +267,7 @@ export function AccountClient({
             onClick={() => setSheetOpen(true)}
             rightIcon={
               <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-                <Avatar size={28} color={avatarColor} letter={initial} />
+                <Avatar size={28} color={avatarColor} letter={initial} imageUrl={avatarUrl} />
                 <ChevronIcon />
               </div>
             }
@@ -204,6 +286,20 @@ export function AccountClient({
         <div>
           <Row label="メールアドレス" value={email} chevron={false} />
           <Row label="パスワードを変更" sub="パスワードを変更する場合はこちら" href="/account/password" />
+        </div>
+
+        {/* Plan */}
+        <div style={{ paddingTop: 32 }} />
+        <SectionLabel>Plan</SectionLabel>
+        <div>
+          {isPro ? (
+            <Row label="プラン" value="Pro（有効）" chevron={false} />
+          ) : (
+            <>
+              <Row label="プラン" value="無料" chevron={false} />
+              <Row label="アップグレード" value="Pro プランを見る" onClick={openPaywall} />
+            </>
+          )}
         </div>
 
         {/* Danger zone */}
@@ -253,26 +349,45 @@ export function AccountClient({
               </h2>
             </div>
             <div style={{ display: "flex", justifyContent: "center", padding: "12px 0 32px" }}>
-              <Avatar size={104} color={avatarColor} letter={initial} />
+              <Avatar size={104} color={avatarColor} letter={initial} imageUrl={avatarUrl} loading={uploadingAvatar} />
             </div>
+            {avatarError && (
+              <p style={{
+                margin: "0 0 16px", padding: "0 28px",
+                fontFamily: "Zen Kaku Gothic New, sans-serif", fontSize: 11, color: DANGER, textAlign: "center",
+              }}>
+                {avatarError}
+              </p>
+            )}
             <div style={{ borderTop: `1px solid ${DARK_LINE}`, borderBottom: `1px solid ${DARK_LINE}` }}>
               <button
                 onClick={() => fileInputRef.current?.click()}
-                style={{ display: "flex", alignItems: "center", gap: 14, padding: "18px 28px", width: "100%", background: "none", border: "none", cursor: "pointer" }}
+                disabled={uploadingAvatar}
+                style={{ display: "flex", alignItems: "center", gap: 14, padding: "18px 28px", width: "100%", background: "none", border: "none", cursor: uploadingAvatar ? "default" : "pointer", opacity: uploadingAvatar ? 0.5 : 1 }}
               >
                 <CameraIcon color={W_55} />
-                <span style={{ fontFamily: "Zen Kaku Gothic New, sans-serif", fontSize: 14, color: W_92 }}>写真から選ぶ</span>
+                <span style={{ fontFamily: "Zen Kaku Gothic New, sans-serif", fontSize: 14, color: W_92 }}>
+                  {uploadingAvatar ? "アップロード中..." : "写真から選ぶ"}
+                </span>
               </button>
-              <input ref={fileInputRef} type="file" accept="image/*" className="hidden" />
+              <input
+                ref={fileInputRef}
+                type="file"
+                accept="image/*"
+                className="hidden"
+                onChange={handleAvatarChange}
+              />
             </div>
             <div style={{ padding: "24px 28px 0" }}>
               <button
                 onClick={() => setSheetOpen(false)}
+                disabled={uploadingAvatar}
                 style={{
                   width: "100%", height: 50, border: `1px solid ${DARK_LINE}`, borderRadius: 2,
                   background: "transparent", color: W_92,
                   fontFamily: "Zen Kaku Gothic New, sans-serif",
-                  fontSize: 13, letterSpacing: "0.15em", cursor: "pointer",
+                  fontSize: 13, letterSpacing: "0.15em", cursor: uploadingAvatar ? "default" : "pointer",
+                  opacity: uploadingAvatar ? 0.5 : 1,
                 }}
               >
                 キャンセル

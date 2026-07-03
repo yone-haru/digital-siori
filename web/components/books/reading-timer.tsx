@@ -5,6 +5,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { saveReadingSession } from "@/app/books/[id]/reading/actions";
 import { DialInput } from "@/components/ui/dial-input";
+import { getActiveSession, saveActiveSession, clearActiveSession } from "@/lib/active-session";
 
 const BRIGHT = "rgba(255,255,255,0.92)";
 const DIM = "rgba(255,255,255,0.55)";
@@ -39,6 +40,30 @@ export function ReadingTimer({ bookId, bookTitle, bookAuthor, startPage, totalPa
   const mountTime = useRef(Date.now());
   const startedAt = useRef(new Date().toISOString());
   const frozenElapsed = useRef(0);
+
+  // 強制終了などで残っていた読書セッションのスナップショットがあれば、その開始時刻から復元する
+  // （localStorage は SSR で読めないため、マウント後の useEffect でのみ判定する）
+  useEffect(() => {
+    const resume = getActiveSession();
+    if (resume && resume.bookId === bookId) {
+      const initialElapsed = Math.max(
+        0,
+        Math.floor((Date.now() - new Date(resume.startedAt).getTime()) / 1000)
+      );
+      startedAt.current = resume.startedAt;
+      mountTime.current = Date.now() - initialElapsed * 1000;
+      setElapsed(initialElapsed);
+    }
+    saveActiveSession({
+      bookId,
+      bookTitle,
+      bookAuthor,
+      startPage,
+      totalPages: totalPages ?? 0,
+      startedAt: startedAt.current,
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   useEffect(() => {
     if (!isRunning) return;
@@ -76,10 +101,17 @@ export function ReadingTimer({ bookId, bookTitle, bookAuthor, startPage, totalPa
       setError(result.error);
       setPhase("confirm");
     } else if (result && "success" in result) {
+      // 正常に記録できたので、復元用スナップショットはもう不要
+      clearActiveSession();
       setSavedResult({ durationSeconds: result.durationSeconds, pagesRead: result.pagesRead });
       setPhase("saved");
     }
   }, [bookId, startPage, currentPage, pendingMemos]);
+
+  // 記録せずに離脱する場合はスナップショットを破棄する（本棚に復元バナーを残さない）
+  function handleDiscard() {
+    clearActiveSession();
+  }
 
   function handleOpenMemo() {
     setMemoPage(currentPage);
@@ -103,6 +135,7 @@ export function ReadingTimer({ bookId, bookTitle, bookAuthor, startPage, totalPa
       <div className="flex justify-between items-center px-7 py-3 shrink-0">
         <Link
           href={`/books/${bookId}`}
+          onClick={handleDiscard}
           className="text-white/60 hover:text-white/90 transition-colors"
           aria-label="戻る"
         >

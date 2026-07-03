@@ -52,9 +52,8 @@ export async function saveReadingSession(
   if (sessionError || !sessionData) return { error: "セッションの記録に失敗しました" };
 
   if (input.memos && input.memos.length > 0) {
-    await supabase.from("session_memos").insert(
+    await supabase.from("book_memos").insert(
       input.memos.map((m) => ({
-        session_id: sessionData.id,
         book_id: input.bookId,
         user_id: user.id,
         page_number: m.pageNumber,

@@ -1,15 +1,16 @@
 import type { Metadata, Viewport } from "next";
 import { AuthProvider } from "@/components/providers/auth-provider";
+import { SubscriptionProvider } from "@/components/providers/subscription-provider";
 import "./globals.css";
 
 export const metadata: Metadata = {
   metadataBase: new URL("https://digital-siori.vercel.app"),
-  title: "デジタル栞",
+  title: "Yondle",
   description: "紙の本の読書進捗を記録するデジタル本棚アプリ",
   appleWebApp: {
     capable: true,
     statusBarStyle: "default",
-    title: "デジタル栞",
+    title: "Yondle",
   },
 };
 
@@ -32,7 +33,9 @@ export default function RootLayout({
   return (
     <html lang="ja">
       <body className="min-h-screen bg-bg antialiased">
-        <AuthProvider>{children}</AuthProvider>
+        <AuthProvider>
+          <SubscriptionProvider>{children}</SubscriptionProvider>
+        </AuthProvider>
       </body>
     </html>
   );

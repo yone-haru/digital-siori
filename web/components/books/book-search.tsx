@@ -5,10 +5,13 @@ import Image from "next/image";
 import { searchGoogleBooks, type GoogleBook } from "@/lib/google-books";
 import { addBook } from "@/app/books/add/actions";
 import { ManualAddForm } from "@/components/books/manual-add-form";
+import { useSubscription } from "@/components/providers/subscription-provider";
+import { FREE_LIMITS } from "@/lib/limits";
 
 type SearchState = "idle" | "loading" | "done" | "error";
 
-export function BookSearch() {
+export function BookSearch({ bookCount }: { bookCount: number }) {
+  const { isPro, openPaywall } = useSubscription();
   const [query, setQuery] = useState("");
   const [results, setResults] = useState<GoogleBook[]>([]);
   const [searchState, setSearchState] = useState<SearchState>("idle");
@@ -17,6 +20,9 @@ export function BookSearch() {
   const [addError, setAddError] = useState<string | null>(null);
   const [isPending, startTransition] = useTransition();
   const inputRef = useRef<HTMLInputElement>(null);
+
+  // 無料プランの上限到達を事前に知らせる（追加タップ時に突然ペイウォールを出さない）
+  const limitReached = !isPro && bookCount >= FREE_LIMITS.books;
 
   async function handleSearch(e: React.FormEvent) {
     e.preventDefault();
@@ -35,6 +41,10 @@ export function BookSearch() {
   }
 
   function handleAdd(book: GoogleBook) {
+    if (limitReached) {
+      openPaywall();
+      return;
+    }
     setAddError(null);
     setAddingId(book.googleId);
     startTransition(async () => {
@@ -63,6 +73,21 @@ export function BookSearch() {
         <p className="font-zen text-[12px] text-muted mb-6">
           タイトルや著者で検索してください
         </p>
+
+        {/* 無料プランの上限バナー */}
+        {limitReached && (
+          <button
+            onClick={openPaywall}
+            className="w-full flex justify-between items-center mb-4 px-3.5 py-2.5 rounded-sm border border-line bg-line-2 text-left"
+          >
+            <span className="font-zen text-[11px] text-muted">
+              無料プランの上限（{FREE_LIMITS.books}冊）に達しています
+            </span>
+            <span className="font-zen text-[11px] text-ink underline underline-offset-2 shrink-0 ml-2">
+              Proで無制限に →
+            </span>
+          </button>
+        )}
 
         {/* Search form */}
         <form onSubmit={handleSearch}>
@@ -288,7 +313,7 @@ export function BookSearch() {
                 キャンセル
               </button>
             </div>
-            <ManualAddForm />
+            <ManualAddForm canAdd={!limitReached} onPaywall={openPaywall} />
           </div>
         )}
       </div>

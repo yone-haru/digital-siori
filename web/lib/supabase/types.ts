@@ -122,6 +122,33 @@ export type Database = {
         };
         Relationships: [];
       };
+      book_memos: {
+        Row: {
+          id: string;
+          book_id: string;
+          user_id: string;
+          page_number: number;
+          content: string;
+          created_at: string;
+        };
+        Insert: {
+          id?: string;
+          book_id: string;
+          user_id?: string;
+          page_number?: number;
+          content: string;
+          created_at?: string;
+        };
+        Update: {
+          id?: string;
+          book_id?: string;
+          user_id?: string;
+          page_number?: number;
+          content?: string;
+          created_at?: string;
+        };
+        Relationships: [];
+      };
       book_tags: {
         Row: {
           book_id: string;

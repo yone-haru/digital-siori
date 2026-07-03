@@ -1,12 +1,34 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useMemo } from "react";
 import { BookCover } from "@/components/books/book-cover";
 import { BottomNav } from "@/components/ui/bottom-nav";
 import { CalendarPicker } from "@/components/ui/calendar-picker";
-import { formatDuration } from "@/lib/utils";
+import { formatDuration, splitDuration } from "@/lib/utils";
+import { useSubscription } from "@/components/providers/subscription-provider";
+import { FREE_LIMITS } from "@/lib/limits";
 
-// ── Shared types (also imported by app/stats/page.tsx) ──
+// ── 集計前の生データ（app/stats/page.tsx から渡される） ──
+export type RawBook = {
+  id: string;
+  title: string;
+  author: string;
+  cover_url: string | null;
+  current_page: number;
+  total_pages: number;
+  status: string;
+};
+
+export type RawSession = {
+  id: string;
+  book_id: string;
+  started_at: string;
+  start_page: number | null;
+  end_page: number | null;
+  duration_seconds: number | null;
+};
+
+// ── 集計後の型（このファイル内で計算する） ──
 export type BookDayStat = {
   bookId: string;
   title: string;
@@ -37,6 +59,41 @@ export type OverallStats = {
   totalPages: number;
   streak: number;
 };
+
+// ─────────────────────────────────────────
+// 日付ユーティリティ（JST基準）
+// ─────────────────────────────────────────
+function toJSTDate(isoString: string): string {
+  return new Date(new Date(isoString).getTime() + 9 * 3600 * 1000)
+    .toISOString()
+    .slice(0, 10);
+}
+
+function makeDayLabel(dateStr: string, todayStr: string): string {
+  if (dateStr === todayStr) return "今日";
+  const prev = new Date(todayStr + "T00:00:00Z");
+  prev.setUTCDate(prev.getUTCDate() - 1);
+  if (dateStr === prev.toISOString().slice(0, 10)) return "昨日";
+  const d = new Date(dateStr + "T00:00:00Z");
+  return `${d.getUTCMonth() + 1}/${d.getUTCDate()}`;
+}
+
+function calcStreak(sessionDates: string[], todayStr: string): number {
+  const unique = [...new Set(sessionDates)].sort().reverse();
+  let streak = 0;
+  let check = todayStr;
+  for (const d of unique) {
+    if (d === check) {
+      streak++;
+      const prev = new Date(check + "T00:00:00Z");
+      prev.setUTCDate(prev.getUTCDate() - 1);
+      check = prev.toISOString().slice(0, 10);
+    } else if (d < check) {
+      break;
+    }
+  }
+  return streak;
+}
 
 // ─────────────────────────────────────────
 // 選択日が属する週のデータを dayStats から計算
@@ -428,13 +485,117 @@ function OverallTab({ overall }: { overall: OverallStats }) {
 // StatsClient (main export)
 // ─────────────────────────────────────────
 export function StatsClient({
-  dayStats,
-  overall,
+  books,
+  sessions,
 }: {
-  dayStats: DayStat[];
-  overall: OverallStats;
+  books: RawBook[];
+  sessions: RawSession[];
 }) {
+  const { isPro, openPaywall } = useSubscription();
   const [tab, setTab] = useState<"today" | "all">("today");
+
+  const { dayStats, overall } = useMemo((): {
+    dayStats: DayStat[];
+    overall: OverallStats;
+  } => {
+    const todayStr = toJSTDate(new Date().toISOString());
+
+    // 無料プランは直近 statsMonths ヶ月のセッションのみを表示対象にする
+    let sessionsForDisplay = sessions;
+    if (!isPro) {
+      const cutoff = new Date();
+      cutoff.setMonth(cutoff.getMonth() - FREE_LIMITS.statsMonths);
+      sessionsForDisplay = sessions.filter(
+        (s) => new Date(s.started_at).getTime() >= cutoff.getTime()
+      );
+    }
+
+    const bookMap = new Map(books.map((b) => [b.id, b]));
+
+    type DayBookAgg = { dayPages: number; dayMinutes: number; daySessions: number };
+    const byDate = new Map<string, Map<string, DayBookAgg>>();
+
+    for (const s of sessionsForDisplay) {
+      const dateStr = toJSTDate(s.started_at);
+      if (!byDate.has(dateStr)) byDate.set(dateStr, new Map());
+      const byBook = byDate.get(dateStr)!;
+      if (!byBook.has(s.book_id)) {
+        byBook.set(s.book_id, { dayPages: 0, dayMinutes: 0, daySessions: 0 });
+      }
+      const agg = byBook.get(s.book_id)!;
+      agg.dayPages += Math.max(0, (s.end_page ?? 0) - (s.start_page ?? 0));
+      agg.dayMinutes += Math.round((s.duration_seconds ?? 0) / 60);
+      agg.daySessions += 1;
+    }
+
+    if (!byDate.has(todayStr)) byDate.set(todayStr, new Map());
+
+    const dStats: DayStat[] = [...byDate.entries()]
+      .sort(([a], [b]) => b.localeCompare(a))
+      .map(([dateStr, byBook]) => {
+        const bookDayStats: BookDayStat[] = [...byBook.entries()]
+          .map(([bookId, agg]) => {
+            const book = bookMap.get(bookId);
+            if (!book) return null;
+            return {
+              bookId,
+              title: book.title,
+              author: book.author,
+              coverUrl: book.cover_url,
+              currentPage: book.current_page,
+              totalPages: book.total_pages,
+              ...agg,
+            } satisfies BookDayStat;
+          })
+          .filter(Boolean) as BookDayStat[];
+
+        const totalMinutes = bookDayStats.reduce((s, b) => s + b.dayMinutes, 0);
+        const totalDayPages = bookDayStats.reduce((s, b) => s + b.dayPages, 0);
+        const totalSessions = bookDayStats.reduce((s, b) => s + b.daySessions, 0);
+
+        return {
+          date: dateStr,
+          label: makeDayLabel(dateStr, todayStr),
+          minutes: totalMinutes,
+          pages: totalDayPages,
+          sessions: totalSessions,
+          books: bookDayStats,
+        };
+      });
+
+    const displayDates = sessionsForDisplay.map((s) => toJSTDate(s.started_at));
+    const uniqueDays = new Set(displayDates).size;
+    const totalSeconds = sessionsForDisplay.reduce(
+      (s, r) => s + (r.duration_seconds ?? 0),
+      0
+    );
+    const { hours, minutes } = splitDuration(totalSeconds);
+    const avgMinPerDay =
+      uniqueDays > 0 ? Math.round(totalSeconds / 60 / uniqueDays) : 0;
+    const totalPages = sessionsForDisplay.reduce(
+      (s, r) => s + Math.max(0, (r.end_page ?? 0) - (r.start_page ?? 0)),
+      0
+    );
+
+    // streak・完読数・読書中数は無料プランの表示期間に関係なく全期間のデータで計算する
+    const allSessionDates = sessions.map((s) => toJSTDate(s.started_at));
+    const streak = calcStreak(allSessionDates, todayStr);
+    const finishedCount = books.filter((b) => b.status === "finished").length;
+    const readingCount = books.filter((b) => b.status === "reading").length;
+
+    return {
+      dayStats: dStats,
+      overall: {
+        hours,
+        minutes,
+        avgMinPerDay,
+        finishedCount,
+        readingCount,
+        totalPages,
+        streak,
+      },
+    };
+  }, [books, sessions, isPro]);
 
   return (
     <div className="min-h-screen bg-paper flex flex-col pb-20">
@@ -470,6 +631,21 @@ export function StatsClient({
           ))}
         </div>
       </div>
+
+      {/* 無料プランの表示期間バナー */}
+      {!isPro && (
+        <button
+          onClick={openPaywall}
+          className="mx-7 mt-2 mb-0.5 flex justify-between items-center gap-2 px-3.5 py-2 rounded-sm border border-line text-left shrink-0"
+        >
+          <span className="font-zen text-[11px] text-muted-2">
+            直近{FREE_LIMITS.statsMonths}ヶ月を表示中
+          </span>
+          <span className="font-zen text-[11px] text-ink underline underline-offset-2 shrink-0">
+            Proで全期間表示 →
+          </span>
+        </button>
+      )}
 
       {/* Scrollable content */}
       <div className="flex-1 overflow-y-auto">
