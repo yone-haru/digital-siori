@@ -74,27 +74,29 @@ export function LandingPage() {
   return (
     <main className="min-h-screen bg-bg text-ink">
       {/* ── Nav ── */}
-      <header className="mx-auto flex max-w-5xl items-center justify-between px-7 py-6">
-        <div className="flex items-center gap-3">
+      <header className="mx-auto flex max-w-5xl items-center justify-between gap-3 px-5 py-5 md:px-7 md:py-6">
+        <div className="flex min-w-0 items-center gap-2 md:gap-3">
           <Image
             src="/lp/icon.png"
             alt="Yondle アイコン"
             width={36}
             height={36}
-            className="rounded-lg"
+            className="shrink-0 rounded-lg"
           />
-          <span className="font-cormorant text-2xl tracking-[0.08em]">Yondle</span>
+          <span className="truncate font-cormorant text-xl tracking-[0.08em] md:text-2xl">
+            Yondle
+          </span>
         </div>
-        <nav className="flex items-center gap-6">
+        <nav className="flex shrink-0 items-center gap-3 md:gap-6">
           <Link
             href="/auth/login"
-            className="font-zen text-sm text-muted transition-colors hover:text-ink"
+            className="whitespace-nowrap font-zen text-sm text-muted transition-colors hover:text-ink"
           >
             ログイン
           </Link>
           <Link
             href="/auth/signup"
-            className="rounded bg-ink px-5 py-2.5 font-zen text-sm text-paper transition-opacity hover:opacity-80"
+            className="whitespace-nowrap rounded bg-ink px-4 py-2.5 font-zen text-sm text-paper transition-opacity hover:opacity-80 md:px-5"
           >
             無料ではじめる
           </Link>
