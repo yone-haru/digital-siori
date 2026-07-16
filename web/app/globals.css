@@ -45,3 +45,9 @@ body {
 ::-webkit-scrollbar { width: 4px; }
 ::-webkit-scrollbar-track { background: var(--color-line-2); }
 ::-webkit-scrollbar-thumb { background: var(--color-muted-2); border-radius: 2px; }
+
+.scrollbar-none {
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+}
+.scrollbar-none::-webkit-scrollbar { display: none; }
