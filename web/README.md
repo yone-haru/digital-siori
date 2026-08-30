@@ -22,7 +22,7 @@
 
 ```bash
 git clone <repo-url>
-cd デジタル栞
+cd デジタル栞/web
 ```
 
 ### 2. 依存パッケージをインストール
@@ -43,7 +43,7 @@ npm install
 ### 4. データベーススキーマを適用
 
 1. Supabase ダッシュボードの **SQL Editor** を開く
-2. `supabase/schema.sql` の内容をまるごとコピーして貼り付け、「Run」をクリック
+2. リポジトリ直下の [`supabase/schema.sql`](../supabase/schema.sql) の内容をまるごとコピーして貼り付け、「Run」をクリック
 
 `books` テーブル・`reading_sessions` テーブル・RLS ポリシー・インデックスがすべて作成されます。
 
@@ -84,7 +84,7 @@ npm run dev
 ```bash
 git add .
 git commit -m "initial commit"
-git push origin main
+git push origin master
 ```
 
 ### 2. Vercel でインポート
@@ -122,10 +122,10 @@ npm run start
 ## プロジェクト構成
 
 ```
-デジタル栞/
+web/
 ├── app/
 │   ├── layout.tsx              # ルートレイアウト・メタデータ
-│   ├── page.tsx                # ルート（認証状態に応じてリダイレクト）
+│   ├── page.tsx                # ルート（未ログイン→LP、ログイン済み→/shelf）
 │   ├── globals.css             # グローバルスタイル・カラートークン（ダークモード対応）
 │   ├── error.tsx               # グローバルエラーバウンダリ
 │   ├── not-found.tsx           # 404 ページ
@@ -133,24 +133,35 @@ npm run start
 │   ├── shelf/                  # 本棚（ホーム）画面
 │   ├── books/
 │   │   ├── add/                # 書籍追加・検索
-│   │   └── [id]/               # 書籍詳細・読書タイマー
-│   └── stats/                  # 統計画面
+│   │   └── [id]/                # 書籍詳細・読書タイマー
+│   ├── stats/                  # 統計画面
+│   ├── account/                 # アカウント設定・氏名変更・パスワード変更
+│   ├── delete-account/          # アカウント削除フロー
+│   ├── privacy/                 # プライバシーポリシー
+│   └── api/books/                # サーバーサイド API ルート
 ├── components/
 │   ├── books/                  # 書籍関連コンポーネント
-│   └── ui/                     # 共通 UI（BottomNav・LogoutButton）
+│   ├── account/                 # アカウント関連コンポーネント
+│   ├── auth/                    # ログイン・サインアップフォーム
+│   ├── landing/                  # LP（ランディングページ）
+│   ├── pro/                     # Pro プラン（RevenueCat）関連
+│   ├── providers/                # 認証・サブスクリプション状態の Context
+│   ├── stats/                    # 統計画面コンポーネント
+│   └── ui/                     # 共通 UI（BottomNav・星評価など）
 ├── lib/
-│   ├── supabase/               # Supabase クライアント（client / server / types）
+│   ├── supabase/               # Supabase クライアント（client / server / admin / types）
 │   ├── google-books.ts         # Google Books API パーサー
+│   ├── limits.ts                 # Free / Pro プランの利用上限
 │   └── utils.ts                # 時間・色などユーティリティ
 ├── middleware.ts                # 認証リダイレクト
-├── supabase/
-│   └── schema.sql              # テーブル定義・RLS・インデックス
 ├── .env.example                # 環境変数テンプレート
 ├── next.config.ts
 ├── tailwind.config.ts
 ├── tsconfig.json
 └── package.json
 ```
+
+DB スキーマ（`supabase/schema.sql`）は mobile と共通のため、リポジトリ直下に配置しています。
 
 ---
 
