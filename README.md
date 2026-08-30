@@ -18,9 +18,12 @@ iOS / Android アプリも実装済みで、ストア公開に向けて準備中
 
 - メールアドレスによるアカウント登録・ログイン（Supabase Auth）
 - Google Books API による書籍検索と本棚への登録
+- タグによる本棚の整理・絞り込み
 - 読書タイマーによる読書時間の計測と、ページ進捗の記録
 - 読書統計（今日・累計）の可視化
 - 書籍ごと・セッションごとのメモ
+- 評価・レビューの記録（5段階評価とレビュー文）
+- プロフィール画像（アバター）のアップロード
 - Pro プランのサブスクリプション（RevenueCat）
 - アカウント削除機能
 
@@ -32,7 +35,8 @@ iOS / Android アプリも実装済みで、ストア公開に向けて準備中
 | モバイル | Expo + React Native + TypeScript |
 | スタイル | Tailwind CSS |
 | 認証・DB | Supabase (Auth + PostgreSQL + Edge Functions) |
-| 課金 | RevenueCat |
+| データフェッチ・キャッシュ | TanStack Query（モバイル） |
+| 課金 | RevenueCat（Web版は Stripe 経由の Web Billing にも対応） |
 | 書籍情報 | Google Books API |
 | ホスティング | Vercel |
 
