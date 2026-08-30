@@ -1,6 +1,6 @@
 # デジタル栞（Yondle）
 
-紙の本の「どこまで読んだか忘れた」をなくす、静かな読書記録アプリ。書影の自動取得から読書タイマー、統計まで、Web とモバイル(iOS / Android)の両方で使えます。
+紙の本の「どこまで読んだか忘れた」をなくす、アナログの本向けの読書記録アプリ。書影の自動取得から読書タイマー、統計まで、Web とモバイル(iOS / Android)の両方で使えます。
 
 ## 今すぐ使う
 
@@ -13,6 +13,10 @@ iOS / Android アプリも実装済みで、ストア公開に向けて準備中
 | 本棚 | 読書タイマー | 統計 |
 |---|---|---|
 | ![本棚画面](docs/screenshots/library_notaskbar.jpg) | ![読書タイマー画面](docs/screenshots/now_reading_notaskbar.jpg) | ![読書統計画面](docs/screenshots/stats_total_notaskbar.jpg) |
+
+| 読んだ時間が、積み重なる。 | 読み終えた余韻を、記録に。 |
+|---|---|
+| ![読書タイマーと本棚のストア掲載用画像](docs/screenshots/store_01.png) | ![書籍詳細のストア掲載用画像](docs/screenshots/store_02.png) |
 
 ## 主な機能
 
