@@ -6,7 +6,7 @@
 
 **[https://digital-siori.vercel.app](https://digital-siori.vercel.app)** — メールアドレスだけで今すぐ始められます。
 
-iOS / Android アプリも実装済みで、ストア公開に向けて準備中です。
+iOS / Android アプリも実装済みで、Google Play のクローズドテストを実施中です。
 
 ## スクリーンショット
 
@@ -83,7 +83,7 @@ Google Play はアプリ内からのアカウント削除手段を要求して�
 ```
 digital-siori/
 ├── web/      # Next.js Web アプリ（LP・本棚・統計・アカウント管理） → web/README.md
-├── mobile/   # Expo モバイルアプリ（iOS / Android、ストア公開準備中）
+├── mobile/   # Expo モバイルアプリ（iOS / Android、Google Play クローズドテスト中）
 ├── poster/   # 紹介用 A4 ポスター（HTML / PDF / PPTX 生成スクリプト）
 └── docs/     # 設計ドキュメント・スクリーンショット
 ```
