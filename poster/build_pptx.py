@@ -1,6 +1,7 @@
 # -*- coding: utf-8 -*-
 """Yondle A4 poster -> PowerPoint (single A4 portrait slide)."""
 import os
+from pathlib import Path
 from PIL import Image, ImageDraw
 from pptx import Presentation
 from pptx.util import Mm, Pt, Emu
@@ -9,7 +10,7 @@ from pptx.enum.text import PP_ALIGN, MSO_ANCHOR
 from pptx.enum.shapes import MSO_SHAPE
 from pptx.oxml.ns import qn
 
-ROOT = r"C:\Users\晴輝\Documents\Life log factory\デジタル栞"
+ROOT = Path(__file__).resolve().parent.parent
 LP = os.path.join(ROOT, "web", "public", "lp")
 SCRATCH = os.path.dirname(os.path.abspath(__file__))
 
