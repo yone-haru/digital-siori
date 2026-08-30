@@ -187,7 +187,7 @@ for i, (no, title, body) in enumerate(feats):
 # Bottom
 by = 262
 hairline(MX, by - 4.5, 180, 0.4)
-slide.shapes.add_picture(os.path.join(SCRATCH, "qr.png"),
+slide.shapes.add_picture(os.path.join(ROOT, "poster", "qr.png"),
                          Mm(MX), Mm(by), Mm(23), Mm(23))
 textbox(46, by + 0.5, 70, 8, [dict(text="無料ではじめる", size=15, latin=SERIF_JA, ea=SERIF_JA_RPR, spc=0.9)])
 textbox(46, by + 9, 70, 5, [dict(text="メールアドレスだけで登録できます", size=8, color=MUTED, ea=GOTHIC_RPR)])
