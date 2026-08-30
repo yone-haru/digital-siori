@@ -131,7 +131,7 @@ Phase 1 が完了したら、内容を報告してください。その後 Phase
 
 ## 🎨 デザインファイルを使う上での注意点
 
-`design_handoff_digital_shiori/` フォルダ内のJSXファイルをデザイン参照として使う際に必ず守ってほしいこと。
+`design_handoff_digital_shiori_削除UI 追加版/` フォルダ内のJSXファイルをデザイン参照として使う際に必ず守ってほしいこと。
 
 ### ファイルの役割分担
 

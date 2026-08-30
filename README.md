@@ -11,9 +11,9 @@ iOS / Android アプリも実装済みで、ストア公開に向けて準備中
 ## スクリーンショット
 
 <p>
-  <img src="mobile/screen%20short/実機/library_notaskbar.jpg" width="220" alt="本棚画面" />
-  <img src="mobile/screen%20short/実機/now_reading_notaskbar.jpg" width="220" alt="読書タイマー画面" />
-  <img src="mobile/screen%20short/実機/stats_total_notaskbar.jpg" width="220" alt="読書統計画面" />
+  <img src="docs/screenshots/library_notaskbar.jpg" width="220" alt="本棚画面" />
+  <img src="docs/screenshots/now_reading_notaskbar.jpg" width="220" alt="読書タイマー画面" />
+  <img src="docs/screenshots/stats_total_notaskbar.jpg" width="220" alt="読書統計画面" />
 </p>
 
 ## できること
