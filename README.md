@@ -59,7 +59,6 @@ graph LR
   Mobile --> Books
   Web --> RC
   Mobile --> RC
-  RC --> DB
   Web --> Del
   Mobile --> Del
   Del --> DB
