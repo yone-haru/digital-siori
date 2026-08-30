@@ -10,9 +10,9 @@ iOS / Android アプリも実装済みで、ストア公開に向けて準備中
 
 ## スクリーンショット
 
-| 本棚 | 読書タイマー | 統計 |
-|---|---|---|
-| ![本棚画面](docs/screenshots/library_notaskbar.jpg) | ![読書タイマー画面](docs/screenshots/now_reading_notaskbar.jpg) | ![読書統計画面](docs/screenshots/stats_total_notaskbar.jpg) |
+| 本棚 | 書籍詳細 | 読書タイマー | 統計 |
+|---|---|---|---|
+| ![本棚画面](docs/screenshots/library_notaskbar.jpg) | ![書籍詳細画面](docs/screenshots/detail_notaskbar.jpg) | ![読書タイマー画面](docs/screenshots/now_reading_notaskbar.jpg) | ![読書統計画面](docs/screenshots/stats_total_notaskbar.jpg) |
 
 | 読んだ時間が、積み重なる。 | 読み終えた余韻を、記録に。 | 習慣が、数字になる。 | 本の登録は、数秒で。 |
 |---|---|---|---|
